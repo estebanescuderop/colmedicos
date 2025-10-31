@@ -1,0 +1,16 @@
+README.md
+pyproject.toml
+src/Colmedicos/__init__.py
+src/Colmedicos/api.py
+src/Colmedicos/charts.py
+src/Colmedicos/config.py
+src/Colmedicos/ia.py
+src/Colmedicos/io_utils.py
+src/Colmedicos/math_ops.py
+src/Colmedicos/registry.py
+src/Colmedicos/setup.py
+src/tu_proyecto.egg-info/PKG-INFO
+src/tu_proyecto.egg-info/SOURCES.txt
+src/tu_proyecto.egg-info/dependency_links.txt
+src/tu_proyecto.egg-info/top_level.txt
+tests/test_api.py
