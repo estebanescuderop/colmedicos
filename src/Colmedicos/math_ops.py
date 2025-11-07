@@ -20,12 +20,12 @@ from typing import Callable, Literal
 import webbrowser
 import tempfile
 import plotly.express as px
-from .registry import register
+from Colmedicos.registry import register
 
 from typing import Any, List, Dict, Union
 import numpy as np
 
-@register("")
+@register("suma_condicional_multiple")
 def suma_condicional_multiple(df, columna_suma, condiciones):
     """
     Suma valores de 'columna_suma' cumpliendo múltiples condiciones.
@@ -193,22 +193,88 @@ def porcentaje_participacion(df, columna):
     total = df[columna].sum()
     return (df[columna] / total) * 100
 
+def distinct_sum(
+    df: pd.DataFrame,
+    value_column: str,
+    distinct_by: str,
+    mask: pd.Series = None
+) -> float:
+    """
+    Suma value_column luego de quitar duplicados por distinct_by (keep='first').
+    Aplica opcionalmente una máscara condicional previa.
+    """
+    if mask is None:
+        mask = pd.Series(True, index=df.index)
+    if distinct_by not in df.columns:
+        raise ValueError(f"distinct_by no existe: {distinct_by}")
+    if value_column not in df.columns:
+        raise ValueError(f"value_column no existe: {value_column}")
+
+    sub = df.loc[mask, [distinct_by, value_column]].drop_duplicates(subset=[distinct_by], keep='first')
+    return float(pd.to_numeric(sub[value_column], errors='coerce').sum())
+
+def distinct_count_by(
+    df: pd.DataFrame,
+    distinct_by: str,
+    mask: pd.Series = None,
+    dropna: bool = True
+) -> int:
+    """
+    Conteo de entidades únicas según distinct_by, con máscara opcional.
+    """
+    if mask is None:
+        mask = pd.Series(True, index=df.index)
+    if distinct_by not in df.columns:
+        raise ValueError(f"distinct_by no existe: {distinct_by}")
+    vals = df.loc[mask, distinct_by]
+    return int(vals.dropna().nunique() if dropna else vals.nunique(dropna=False))
+
+
+# --- Operadores soportados ---
+_OPS = {
+    '>': operator.gt,
+    '<': operator.lt,
+    '==': operator.eq,
+    '!=': operator.ne,
+    '>=': operator.ge,
+    '<=': operator.le,
+    'in':  lambda a, b: a.isin(b),
+    'not in': lambda a, b: ~a.isin(b),
+
+    # Nuevos
+    'between': lambda a, rng: (pd.to_numeric(a, errors='coerce') >= rng[0]) & (pd.to_numeric(a, errors='coerce') <= rng[1]),
+    'between_open': lambda a, rng: (pd.to_numeric(a, errors='coerce') > rng[0]) & (pd.to_numeric(a, errors='coerce') < rng[1]),
+    'contains': lambda a, s: a.astype('string').str.contains(s, case=False, na=False),
+    'regex': lambda a, pat: a.astype('string').str.contains(pat, regex=True, na=False),
+}
+
 def _coerce_condition_value(series: pd.Series, op: str, val: Any):
-    """Intenta convertir el valor de condición al tipo compatible con la serie."""
-    if op in ("in", "not in"):
+    """
+    Convierte el valor de condición al tipo compatible con la serie (numérico si aplica).
+    Maneja listas para in/not in y tuplas para between.
+    """
+    if op in ('in', 'not in'):
         if not isinstance(val, (list, tuple, set)):
             val = [val]
-        # casteo suave por tipo de la serie
         if np.issubdtype(series.dtype, np.number):
-            return [pd.to_numeric(x, errors="coerce") for x in val]
+            return [pd.to_numeric(v, errors='coerce') for v in val]
         return list(val)
-    else:
-        if np.issubdtype(series.dtype, np.number):
-            try:
-                return pd.to_numeric(val, errors="coerce")
-            except Exception:
-                return val
+
+    if op in ('between', 'between_open'):
+        if not isinstance(val, (list, tuple)) or len(val) != 2:
+            raise ValueError(f"El operador {op} requiere un rango [min, max].")
+        # Coerce numérico
+        return (pd.to_numeric(val[0], errors='coerce'), pd.to_numeric(val[1], errors='coerce'))
+
+    # contains / regex no convierten el patrón
+    if op in ('contains', 'regex'):
         return val
+
+    if np.issubdtype(series.dtype, np.number):
+        return pd.to_numeric(val, errors='coerce')
+    return val
+
+
 
 def run_operation_from_params(df: pd.DataFrame, params: Dict[str, Any]) -> Union[float, int, pd.Series, Any]:
     """
@@ -303,41 +369,227 @@ def run_operation_from_params(df: pd.DataFrame, params: Dict[str, Any]) -> Union
             coaccionar_a_numerico=bool(coaccionar),
             default_si_vacio=default_vacio
         ))
+    # Nuevas rutas
+    if fn == "suma_condicional_multiple_unique":
+        unique_on = params.get("unique_on")
+        if not unique_on:
+            raise ValueError("unique_on es requerido para suma_condicional_multiple_unique.")
+        return float(suma_condicional_multiple_unique(df, target, conditions, unique_on))
+
+    if fn == "conteo_condicional_multiple_unique":
+        unique_on = params.get("unique_on")
+        if not unique_on:
+            raise ValueError("unique_on es requerido para conteo_condicional_multiple_unique.")
+        return int(conteo_condicional_multiple_unique(df, unique_on=unique_on, condiciones=conditions))
     raise ValueError(f"function_name no soportado: {fn}")
 
+# --- máscaras condicionales ---
+_NUMERIC_OPS = {'>', '<', '>=', '<=', '==', '!='}
+_SET_OPS = {'in', 'not in'}
 
+def _to_numeric_series(s: pd.Series) -> pd.Series:
+    # limpia comas decimales comunes en CSV
+    s2 = s.astype(str).str.replace(',', '.', regex=False)
+    return pd.to_numeric(s2, errors='coerce')
 
-import operator
-import pandas as pd
-import numpy as np
-from typing import List, Dict, Any, Optional, Union
+def _to_datetime_series(s: pd.Series) -> pd.Series:
+    return pd.to_datetime(s, errors='coerce', utc=False, infer_datetime_format=True)
 
-# --- util: construir máscara desde condiciones ---
-_OPS = {
-    '>': operator.gt,
-    '<': operator.lt,
-    '==': operator.eq,
-    '!=': operator.ne,
-    '>=': operator.ge,
-    '<=': operator.le,
-    'in':  lambda a, b: a.isin(b),
-    'not in': lambda a, b: ~a.isin(b),
-}
+def _coerce_for_op(series: pd.Series, op: str, val: Any):
+    """
+    Devuelve (serie_convertida, val_convertido, tipo)
+    tipo ∈ {'numeric','datetime','raw'}
+    """
+    # Si ya es numérica
+    if np.issubdtype(series.dtype, np.number):
+        v = pd.to_numeric(val, errors='coerce') if op not in _SET_OPS else [
+            pd.to_numeric(x, errors='coerce') for x in (val if isinstance(val, (list, tuple, set)) else [val])
+        ]
+        return (series, v, 'numeric')
 
-def _mask_from_conditions(df: pd.DataFrame, condiciones: List[List[Any]]) -> pd.Series:
+    # Si parece fecha o el valor es fecha
+    try_dt_series = _to_datetime_series(series)
+    # Heurística: si al menos 50% convierte a datetime, lo tratamos como fecha
+    if try_dt_series.notna().mean() >= 0.5:
+        if op in _SET_OPS:
+            vals = val if isinstance(val, (list, tuple, set)) else [val]
+            v = [pd.to_datetime(x, errors='coerce', utc=False, infer_datetime_format=True) for x in vals]
+        else:
+            v = pd.to_datetime(val, errors='coerce', utc=False, infer_datetime_format=True)
+        return (try_dt_series, v, 'datetime')
+
+    # Intento numérico si la serie es object pero con números como texto
+    try_num_series = _to_numeric_series(series)
+    if try_num_series.notna().mean() >= 0.5:
+        if op in _SET_OPS:
+            vals = val if isinstance(val, (list, tuple, set)) else [val]
+            v = [pd.to_numeric(str(x).replace(',', '.'), errors='coerce') for x in vals]
+        else:
+            v = pd.to_numeric(str(val).replace(',', '.'), errors='coerce')
+        return (try_num_series, v, 'numeric')
+
+    # Sin conversión: trabajar en bruto (strings)
+    if op in _SET_OPS:
+        v = list(val) if isinstance(val, (list, tuple, set)) else [val]
+    else:
+        v = val
+    return (series.astype(str), v, 'raw')
+
+def _apply_op(series: pd.Series, op: str, val: Any) -> pd.Series:
+    if op == 'in':
+        # val es lista
+        return series.isin(val)
+    if op == 'not in':
+        return ~series.isin(val)
+
+    OP = {
+        '>': operator.gt, '<': operator.lt, '>=': operator.ge, '<=': operator.le,
+        '==': operator.eq, '!=': operator.ne
+    }[op]
+
+    out = OP(series, val)
+    # Asegura booleanos (los NaN → False)
+    return out.fillna(False)
+
+def _mask_from_conditions(df: pd.DataFrame, condiciones: List[List[Any]], logic: str = "AND") -> pd.Series:
+    """
+    condiciones: [["col","op","valor"], ...]
+    logic: "AND" o "OR" para combinar las condiciones planas.
+    """
     if not condiciones:
         return pd.Series(True, index=df.index)
-    m = pd.Series(True, index=df.index)
+
+    masks = []
     for col, op, val in condiciones:
         if col not in df.columns:
             raise ValueError(f"Columna en condición no existe: {col}")
-        if op not in _OPS:
+        if op not in _NUMERIC_OPS.union(_SET_OPS):
             raise ValueError(f"Operador no soportado: {op}")
-        m &= _OPS[op](df[col], val)
-    return m
 
-# --- métricas atómicas ---
-def _metric_on_series(s: pd.Series, op: str, *, count_nulls=False, weights=None, safe_div0=None):
+        s0 = df[col]
+        s, v, _kind = _coerce_for_op(s0, op, val)
+        m = _apply_op(s, op, v)
+        masks.append(m)
+
+    if logic.upper() == "OR":
+        m_all = masks[0].copy()
+        for m in masks[1:]:
+            m_all = m_all | m
+        return m_all
+    else:
+        # AND por defecto
+        m_all = masks[0].copy()
+        for m in masks[1:]:
+            m_all = m_all & m
+        return m_all
+
+def build_mask_with_groups(
+    df: pd.DataFrame,
+    *,
+    conditions=None,                 # condiciones planas
+    conditions_logic: str = "AND",
+    condition_groups=None            # [{conditions:[...], logic:"AND|OR"}, ...]
+) -> pd.Series:
+    """
+    Soporta:
+      - conditions planas con AND/OR
+      - condition_groups para expresiones tipo (A AND B) OR (C AND D)
+    Si se especifica condition_groups, combina sus máscaras con OR por defecto,
+    pudiendo cambiarlo si lo deseas.
+    """
+    if condition_groups:
+        group_masks = []
+        for grp in condition_groups:
+            grp_conds = grp.get("conditions", [])
+            grp_logic = grp.get("logic", "AND")
+            group_masks.append(_mask_from_conditions(df, grp_conds, grp_logic))
+        # Combina grupos con OR (puedes ajustar a tu necesidad)
+        m_all = pd.Series(False, index=df.index)
+        for gm in group_masks:
+            m_all = m_all | gm
+        return m_all
+
+    # Solo condiciones planas
+    return _mask_from_conditions(df, conditions or [], conditions_logic)
+
+
+def _mask_from_condition_blocks(
+    df: pd.DataFrame,
+    conditions_all: List[List[Any]] = None,
+    conditions_any: List[List[Any]] = None
+) -> pd.Series:
+    """
+    Construye una máscara booleana combinando:
+      - AND de 'conditions_all'
+      - AND por bloque dentro de 'conditions_any', y luego OR entre bloques
+
+    Formatos admitidos (compatibles con tu versión anterior):
+      - Condición simple: ["col","op","valor"]
+      - Bloque AND: [ ["col","op","valor"], ["col","op","valor"], ... ]
+
+    Requiere que _mask_from_conditions(df, conditions, logic="AND") ya implemente:
+      - Coerción numérica/fecha
+      - Operadores: >, <, ==, !=, >=, <=, in, not in
+      - Manejo de NaN
+    """
+
+    # Identidad de AND (todo verdadero)
+    base_and = pd.Series(True, index=df.index) if len(df.index) else pd.Series(dtype=bool)
+
+    # AND de todas las condiciones en conditions_all (si vienen)
+    if conditions_all:
+        m_all = _mask_from_conditions(df, conditions_all, logic="AND")
+    else:
+        m_all = base_and
+
+    # Si no hay bloque OR, devolvemos el AND puro
+    if not conditions_any:
+        return m_all
+
+    # OR de los bloques en conditions_any
+    #   - cada elemento puede ser una condición simple o un bloque AND
+    or_mask = pd.Series(False, index=df.index) if len(df.index) else pd.Series(dtype=bool)
+
+    for cond in conditions_any:
+        # ¿Es un bloque AND (lista de condiciones)?
+        if isinstance(cond, (list, tuple)) and cond and isinstance(cond[0], (list, tuple)):
+            # Bloque AND: cada item debe ser ["col","op","valor"]
+            m_blk = _mask_from_conditions(df, cond, logic="AND")
+            or_mask |= m_blk
+        else:
+            # Condición simple: normalízala a lista de 1 condición
+            m_single = _mask_from_conditions(df, [cond], logic="AND")
+            or_mask |= m_single
+
+    # Resultado final: (ALL) AND (ANY)
+    return m_all & or_mask
+
+
+def suma_condicional_multiple_unique(
+    df: pd.DataFrame,
+    columna_suma: str,
+    condiciones: List[List[Any]],
+    unique_on: str
+) -> float:
+    mask = _mask_from_conditions(df, condiciones or [])
+    return distinct_sum(df, value_column=columna_suma, distinct_by=unique_on, mask=mask)
+
+def conteo_condicional_multiple_unique(
+    df: pd.DataFrame,
+    unique_on: str,
+    condiciones: List[List[Any]]
+) -> int:
+    mask = _mask_from_conditions(df, condiciones or [])
+    return distinct_count_by(df, distinct_by=unique_on, mask=mask, dropna=True)
+
+def _metric_on_series(
+    s: pd.Series,
+    op: str,
+    *,
+    count_nulls: bool = False,
+    weights: pd.Series = None,
+    safe_div0=None
+):
     if op == "sum":
         return float(pd.to_numeric(s, errors="coerce").sum())
     if op == "count":
@@ -354,7 +606,6 @@ def _metric_on_series(s: pd.Series, op: str, *, count_nulls=False, weights=None,
     if op == "distinct_count":
         return int(s.nunique(dropna=True))
     if op == "weighted_avg":
-        # weights es otra serie alineada
         s = pd.to_numeric(s, errors="coerce")
         w = pd.to_numeric(weights, errors="coerce")
         num = (s * w).sum(skipna=True)
@@ -364,101 +615,96 @@ def _metric_on_series(s: pd.Series, op: str, *, count_nulls=False, weights=None,
         return float(num / den)
     raise ValueError(f"Operación no soportada: {op}")
 
-# --- ejecutor principal ---
+
 def ejecutar_operaciones_condicionales(
     df: pd.DataFrame,
-    spec: Dict[str, Any],          # JSON del subprompt
+    spec: Dict[str, Any],
 ) -> Union[pd.DataFrame, Dict[str, Any]]:
-    """
-    Ejecuta múltiples operaciones condicionales.
-    Si 'group_by' es None -> retorna dict {alias: valor}
-    Si 'group_by' es lista -> retorna DataFrame con columnas group_by + resultados
-    """
+
     operations = spec.get("operations", [])
     group_by = spec.get("group_by")
 
     if not operations:
         return {} if not group_by else pd.DataFrame()
 
-    # --- sin group_by: resolver operación por operación ---
+    def _resolve_mask(_df, op_spec):
+        # Compat: 'conditions' (AND) + nuevos 'conditions_all'/'conditions_any'
+        conds_all = op_spec.get("conditions_all")
+        conds_any = op_spec.get("conditions_any")
+        legacy = op_spec.get("conditions")
+        if conds_all is None and conds_any is None and legacy is None:
+            return pd.Series(True, index=_df.index)
+        if conds_all is None and conds_any is None:
+            return _mask_from_conditions(_df, legacy or [])
+        return _mask_from_condition_blocks(_df, conds_all, conds_any)
+
+    def _apply_ops(_df, op_spec):
+        op = op_spec["op"]
+        alias = op_spec.get("alias", f"{op}_result")
+
+        if op == "ratio":
+            num = op_spec["numerator"]     # {column, conditions_xxx}
+            den = op_spec["denominator"]
+            num_mask = _resolve_mask(_df, num)
+            den_mask = _resolve_mask(_df, den)
+            num_val = _metric_on_series(pd.to_numeric(_df.loc[num_mask, num["column"]], errors="coerce"), "sum")
+            den_val = _metric_on_series(pd.to_numeric(_df.loc[den_mask, den["column"]], errors="coerce"), "sum")
+            if den_val == 0:
+                return alias, (np.nan if op_spec.get("safe_div0") is None else float(op_spec["safe_div0"]))
+            return alias, float(num_val / den_val)
+
+        if op == "weighted_avg":
+            m = _resolve_mask(_df, op_spec)
+            vals = _df.loc[m, op_spec["column"]]
+            wts  = _df.loc[m, op_spec["weights"]]
+            return alias, _metric_on_series(vals, "weighted_avg", weights=wts, safe_div0=op_spec.get("safe_div0"))
+
+        if op == "distinct_sum":
+            m = _resolve_mask(_df, op_spec)
+            return alias, distinct_sum(_df, op_spec["column"], op_spec["distinct_by"], mask=m)
+
+        if op in ("distinct_count", "distinct_count_by"):
+            m = _resolve_mask(_df, op_spec)
+            key = op_spec.get("distinct_by", op_spec.get("column"))
+            if not key:
+                raise ValueError("distinct_count requiere 'column' o 'distinct_by'.")
+            return alias, distinct_count_by(_df, key, mask=m, dropna=True)
+
+        # operaciones simples: sum, count, avg, min, max...
+        m = _resolve_mask(_df, op_spec)
+        serie = _df.loc[m, op_spec["column"]]
+        val = _metric_on_series(
+            serie, op,
+            count_nulls=op_spec.get("count_nulls", False)
+        )
+        return alias, val
+
+    # --- sin group_by ---
     if not group_by:
         out = {}
         for op_spec in operations:
-            op = op_spec["op"]
-            alias = op_spec.get("alias", f"{op}_result")
-            if op in ("ratio", "weighted_avg"):
-                if op == "ratio":
-                    num = op_spec["numerator"]
-                    den = op_spec["denominator"]
-                    num_mask = _mask_from_conditions(df, num.get("conditions", []))
-                    den_mask = _mask_from_conditions(df, den.get("conditions", []))
-                    num_val = _metric_on_series(pd.to_numeric(df.loc[num_mask, num["column"]], errors="coerce"), "sum")
-                    den_val = _metric_on_series(pd.to_numeric(df.loc[den_mask, den["column"]], errors="coerce"), "sum")
-                    if den_val == 0:
-                        out[alias] = np.nan if op_spec.get("safe_div0") is None else float(op_spec["safe_div0"])
-                    else:
-                        out[alias] = float(num_val / den_val)
-                elif op == "weighted_avg":
-                    base_mask = _mask_from_conditions(df, op_spec.get("conditions", []))
-                    values = df.loc[base_mask, op_spec["column"]]
-                    weights = df.loc[base_mask, op_spec["weights"]]
-                    out[alias] = _metric_on_series(values, "weighted_avg", weights=weights, safe_div0=op_spec.get("safe_div0"))
-            else:
-                # operaciones simples sobre una serie filtrada
-                mask = _mask_from_conditions(df, op_spec.get("conditions", []))
-                serie = df.loc[mask, op_spec["column"]]
-                out[alias] = _metric_on_series(
-                    serie, op,
-                    count_nulls=op_spec.get("count_nulls", False)
-                )
+            alias, val = _apply_ops(df, op_spec)
+            out[alias] = val
         return out
 
-    # --- con group_by: calcular por grupo ---
+    # --- con group_by ---
     if isinstance(group_by, str):
         group_by = [group_by]
     for g in group_by:
         if g not in df.columns:
             raise ValueError(f"Columna de group_by no existe: {g}")
 
-    # Construimos un DataFrame resultado por grupos
-    grupos = df.groupby(group_by, dropna=False)
     filas = []
-    for gkey, gdf in grupos:
+    for gkey, gdf in df.groupby(group_by, dropna=False):
         fila = {}
-        # clave de grupo -> dict
         if isinstance(gkey, tuple):
             for col, val in zip(group_by, gkey):
                 fila[col] = val
         else:
             fila[group_by[0]] = gkey
 
-        # aplicar cada op sobre gdf
         for op_spec in operations:
-            op = op_spec["op"]
-            alias = op_spec.get("alias", f"{op}_result")
-            if op == "ratio":
-                num = op_spec["numerator"]
-                den = op_spec["denominator"]
-                num_mask = _mask_from_conditions(gdf, num.get("conditions", []))
-                den_mask = _mask_from_conditions(gdf, den.get("conditions", []))
-                num_val = _metric_on_series(pd.to_numeric(gdf.loc[num_mask, num["column"]], errors="coerce"), "sum")
-                den_val = _metric_on_series(pd.to_numeric(gdf.loc[den_mask, den["column"]], errors="coerce"), "sum")
-                if den_val == 0:
-                    fila[alias] = np.nan if op_spec.get("safe_div0") is None else float(op_spec["safe_div0"])
-                else:
-                    fila[alias] = float(num_val / den_val)
-            elif op == "weighted_avg":
-                base_mask = _mask_from_conditions(gdf, op_spec.get("conditions", []))
-                values = gdf.loc[base_mask, op_spec["column"]]
-                weights = gdf.loc[base_mask, op_spec["weights"]]
-                fila[alias] = _metric_on_series(values, "weighted_avg", weights=weights, safe_div0=op_spec.get("safe_div0"))
-            else:
-                mask = _mask_from_conditions(gdf, op_spec.get("conditions", []))
-                serie = gdf.loc[mask, op_spec["column"]]
-                fila[alias] = _metric_on_series(
-                    serie, op,
-                    count_nulls=op_spec.get("count_nulls", False)
-                )
+            alias, val = _apply_ops(gdf, op_spec)
+            fila[alias] = val
         filas.append(fila)
-
     return pd.DataFrame(filas)

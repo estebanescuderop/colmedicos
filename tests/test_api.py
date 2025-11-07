@@ -1,4 +1,4 @@
-from Colmedicos.api import informe_final
+from Colmedicos.api import informe_final, informe_final_test
 import pandas as pd
 from Colmedicos.ia import ask_gpt5
 from Colmedicos.io_utils import aplicar_plot_por_tipo_desde_output, aplicar_ia_por_tipo, generar_output, exportar_output_a_html, mostrar_html
@@ -9,7 +9,7 @@ ruta_archivo = r"C:\Users\EstebanEscuderoPuert\Downloads\Ejemplo tabla.xlsx"
 df = pd.read_excel(ruta_archivo)
 
 ctx = {
-    "nombre_cliente": "Avícola Andina S.A.S.",
+    "nombre_cliente": "D1 S.A.S.",
     "nit_cliente": "901.234.567-8",
     "fecha_inicio": "2025-01-01",
     "fecha_fin": "2025-09-30",
@@ -18,10 +18,11 @@ ctx = {
 }
 
 # Ruta del archivo Excel
-ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\Copia de Historias_D1_SAS_2025-07.xlsx"
+ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\output_d1_colmedicos.xlsx"
 df_datos = pd.read_excel(ruta_archivos)
 
-informe_final(df,df_datos,ctx,valor_tipo_objetivo="Fijo con IA",reemplazar_en_html=True,token_reemplazo="#GRAFICA#")
+
+informe_final_test(df,df_datos,ctx,valor_tipo_objetivo="Fijo con IA",reemplazar_en_html=True,token_reemplazo="#GRAFICA#")
 
 #df_out = generar_output(df)
 
