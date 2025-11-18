@@ -2,6 +2,7 @@
 from Colmedicos.ia import ask_gpt5
 from Colmedicos.io_utils import generar_output, aplicar_data_por_tipo_desde_output, aplicar_ia_por_tipo, aplicar_plot_por_tipo_desde_output, exportar_output_a_html, mostrar_html, limpiar_output_dataframe
 from Colmedicos.registry import register
+from Colmedicos.io_utils_remaster import process_ia_blocks, process_data_blocks, process_plot_blocks, _render_vars_text, parse_plot_blocks, parse_ia_blocks, parse_data_blocks, exportar_output_a_html, _fig_to_data_uri, aplicar_columnas_gpt5, _format_result_plain, columnas_a_texto
 
 # Colmedicos/api.py
 import time
@@ -214,166 +215,117 @@ def informe_final(
     return html_renderizado, meta
 
 
-def informe_final_test(
+def informe_final_V2(
     df: pd.DataFrame,
     df_datos: pd.DataFrame,
     ctx: dict,
-    valor_tipo_objetivo: str = "Fijo con IA",
-    reemplazar_en_html: bool = True,
-    token_reemplazo: str = "#GRAFICA#",
+    salida_html: str = r"C:\Users\EstebanEscuderoPuert\Downloads\informe_final.html",
+    escribir_archivo: bool = True,
+    modo_rapido_plots: bool = True,   # intenta acelerar renders si tu process_plot_blocks lo soporta
 ) -> Tuple[str, Dict[str, Any]]:
     """
-    Procesa df (resumen) y df_datos (detalle) con el contexto ctx y genera:
-      - html_final (str): documento HTML con <img ...> embebidos listo para entregar
-      - meta (dict): resumen técnico del pipeline
-
-    Steps (alto nivel):
-      1. generar_output -> df_out base con columnas Titulo / Contenido -> Output inicial
-      2. aplicar_data_por_tipo_desde_output -> mezcla df_out con df_datos
-      3. aplicar_ia_por_tipo -> aplica IA (ask_gpt5) sobre cierto tipo (ej. "Fijo con IA")
-      4. aplicar_plot_por_tipo_desde_output -> inserta <img src="data:image/png;base64,..."/>
-      5. exportar_output_a_html -> arma el HTML concatenando Output
+    Versión optimizada con:
+      - early-exit por tokens
+      - micro-perfilado por etapa
+      - opción para evitar E/S a disco
     """
+    import time, re
 
-    t0 = time.time()
-    logs: list[str] = []
-    ia_stats = {
-        "total_intentos_ia": 0,
-        "total_errores_ia": 0,
-    }
-    plot_stats = {
-        "graficas_insertadas": 0,
-    }
+    t0 = time.perf_counter()
+    logs = []
+    meta_detalle = {}
 
-    # --- Paso 1: generar_output ---
-    # df_out: DataFrame con columnas Tipo / Output / etc.
+    # --- utilidades de tokens (ajústalas a tus marcadores reales) ---
+    # data: ||...||
+    _re_data = re.compile(r"\|\|.*?\|\|", re.S)
+    # ia: +IA_  (al inicio de línea o en medio)
+    _re_ia   = re.compile(r"\+", re.I)
+    # plots: #GRAFICA# o #GRAFICO# o tus tags internos
+    _re_plot = re.compile(r"#GRAFIC[AO]#", re.I)
+
     try:
-        df_out = generar_output(
-            df,
-            col_texto="Titulo",
-            col_contenido="Contenido",
-            ctx=ctx,
-            strict_ctx=False  # si falta alguna variable en ctx, no revientes
-        )
-        logs.append("generar_output: OK")
-    except Exception as e:
-        logs.append(f"generar_output: ERROR {e}")
-        raise
+        # 1) Render de variables
+        t1 = time.perf_counter()
+        texto_completo = columnas_a_texto(df, "Titulo", "Contenido")  # asumes que ya existe
+        text = _render_vars_text(texto_completo, ctx=ctx, strict=False)
+        meta_detalle["len_texto_render"] = len(text)
+        logs.append("Render de variables: OK")
+        meta_detalle["t_render_vars"] = round(time.perf_counter() - t1, 4)
 
-    # --- Paso 2: aplicar_data_por_tipo_desde_output ---
-    # Combina/enriquece df_out usando df_datos
-    try:
-        df_enriquecido = aplicar_data_por_tipo_desde_output(
-            df_out,
-            df_datos
-        )
-        logs.append("aplicar_data_por_tipo_desde_output: OK")
-    except Exception as e:
-        logs.append(f"aplicar_data_por_tipo_desde_output: ERROR {e}")
-        # si esto falla, ya no podemos seguir coherentemente
-        raise
+        # Detectar tokens de cada módulo antes de llamar nada costoso
+        hay_data = bool(_re_data.search(text))
+        hay_ia   = bool(_re_ia.search(text))
+        hay_plot = bool(_re_plot.search(text))
 
-    # --- Paso 3: aplicar_ia_por_tipo ---
-    # Corre IA para filas con cierto tipo (ej. "Fijo con IA")
-    # Necesitamos capturar cuántas veces falló la IA.
-    try:
-        # asumo que aplicar_ia_por_tipo MODIFICA textos en la col "Output"
-        # y que internamente ya maneja on_error="keep"
-        df_ai = aplicar_ia_por_tipo(
-            df_enriquecido,
-            ask_fn=ask_gpt5,
-            col_tipo="Tipo",
-            col_output="Output",
-            valor_tipo_objetivo=valor_tipo_objetivo,
-            overwrite=True,    # sobrescribe Output con el texto generado
-            on_error="keep"    # si la IA falla, deja el original
-        )
-        logs.append("aplicar_ia_por_tipo: OK")
-
-        # Aquí podemos inferir estadísticas de IA si tu función deja alguna marca,
-        # pero como no tenemos ese detalle exacto, vamos a estimar:
-        #   total_intentos_ia = número de filas cuyo Tipo == valor_tipo_objetivo
-        #   total_errores_ia  = conteo de filas donde Output contiene "[ERROR LLM"
-        # (esto asume que el fallback de ask_gpt5 mete esa marca cuando hay 429 / sin cuota)
-        mask_objetivo = (df_enriquecido["Tipo"] == valor_tipo_objetivo)
-        ia_stats["total_intentos_ia"] = int(mask_objetivo.sum())
-
-        if "Output" in df_ai.columns:
-            ia_stats["total_errores_ia"] = int(
-                df_ai["Output"]
-                .astype(str)
-                .str.contains("[ERROR LLM", regex=False)
-                .sum()
-            )
-
-    except Exception as e:
-        # Si por algún motivo aplicar_ia_por_tipo truena globalmente,
-        # no matamos todo el pipeline: seguimos sin IA.
-        logs.append(f"aplicar_ia_por_tipo: ERROR {e} (continuando sin IA)")
-        df_ai = df_enriquecido.copy()
-        # Stats IA: intentos = filas objetivo, errores = todos ellos
-        mask_objetivo = (df_enriquecido["Tipo"] == valor_tipo_objetivo)
-        ia_stats["total_intentos_ia"] = int(mask_objetivo.sum())
-        ia_stats["total_errores_ia"] = int(mask_objetivo.sum())
-
-    # --- Paso 4: aplicar_plot_por_tipo_desde_output ---
-    # Inserta <img ... base64> dentro de Output reemplazando un token
-    try:
-        # según lo que mostraste antes, aplicar_plot_por_tipo_desde_output
-        # devuelve (df_plot, info_graficas)
-        df_plot, info_plots = aplicar_plot_por_tipo_desde_output(
-            df_ai,
-            df_datos,
-            col_tipo="Tipo",
-            col_output="Output",
-            valor_tipo_objetivo=valor_tipo_objetivo,
-            verbose=True,
-            reemplazar_en_html=True,
-            token_reemplazo=token_reemplazo,
-            replace_all=True,
-            inplace=False  # mejor no mutar df_ai original, devolveme copia
-        )
-        logs.append("aplicar_plot_por_tipo_desde_output: OK")
-
-        # plot_stats: cuántas gráficas se insertaron
-        if isinstance(info_plots, list):
-            plot_stats["graficas_insertadas"] = len(info_plots)
+        # 2) Data blocks (solo si hay ||...|| en el texto)
+        if hay_data:
+            t2 = time.perf_counter()
+            uot = process_data_blocks(df_datos, text)
+            logs.append("Procesamiento de datos: OK")
+            meta_detalle["t_data_blocks"] = round(time.perf_counter() - t2, 4)
+            text_for_next = uot
         else:
-            plot_stats["graficas_insertadas"] = 0
+            logs.append("Procesamiento de datos: SKIP (sin tokens)")
+            text_for_next = text
+
+        # 3) IA blocks (solo si hay +IA_)
+        if hay_ia:
+            t3 = time.perf_counter()
+            out_ia = process_ia_blocks(text_for_next, ask_fn=ask_gpt5)
+            logs.append("Análisis IA: OK")
+            meta_detalle["t_ia_blocks"] = round(time.perf_counter() - t3, 4)
+            text_for_next = out_ia
+        else:
+            logs.append("Análisis IA: SKIP (sin tokens)")
+            # text_for_next se mantiene
+
+        # 4) Plot blocks (solo si hay #GRAFICA#)
+        if hay_plot:
+            t4 = time.perf_counter()
+            # Si tu process_plot_blocks acepta kwargs tipo "fast=True"/"dpi=96"/"tight=False", pásalos aquí:
+            if modo_rapido_plots:
+                try:
+                    out_plot = process_plot_blocks(df_datos, text_for_next, fast=True, dpi=96, tight=False)
+                except TypeError:
+                    # si no acepta kwargs extra, llama normal
+                    out_plot = process_plot_blocks(df_datos, text_for_next)
+            else:
+                out_plot = process_plot_blocks(df_datos, text_for_next)
+
+            logs.append("Procesamiento de gráficas: OK")
+            meta_detalle["t_plot_blocks"] = round(time.perf_counter() - t4, 4)
+            text_for_next = out_plot
+        else:
+            logs.append("Procesamiento de gráficas: SKIP (sin tokens)")
+
+        # 5) Exportar HTML (evitar E/S si no se requiere)
+        t5 = time.perf_counter()
+        if escribir_archivo:
+            html_final = exportar_output_a_html(text_for_next, salida_html)
+            logs.append(f"Exportación HTML final: OK → {salida_html}")
+        else:
+            # muchas implementaciones de exportar_output_a_html ya devuelven el string;
+            # si la tuya siempre escribe a disco, crea un exportador in-memory alterno.
+            html_final = exportar_output_a_html(text_for_next, None)  # si tu función permite None para solo string
+            logs.append("Exportación HTML final: OK (sin escribir a disco)")
+        meta_detalle["t_export_html"] = round(time.perf_counter() - t5, 4)
+
+        duracion = round(time.perf_counter() - t0, 4)
+        meta = {
+            "status": "OK",
+            "duracion_seg": duracion,
+            "logs": logs,
+            "detalle": meta_detalle,
+            "tokens_detectados": {
+                "data_blocks": hay_data,
+                "ia_blocks": hay_ia,
+                "plot_blocks": hay_plot
+            }
+        }
+        return html_final, meta
 
     except Exception as e:
-        logs.append(f"aplicar_plot_por_tipo_desde_output: ERROR {e} (continuando sin plots)")
-        df_plot = df_ai.copy()
-        df_plot = limpiar_output_dataframe(df_plot)
-        plot_stats["graficas_insertadas"] = 0
-
-    # --- Paso 5: exportar_output_a_html ---
-    # Convierte df_plot["Output"] en un documento HTML final concatenado
-    try:
-        html_str = exportar_output_a_html(
-            df_plot,
-            col_output="Output",
-            archivo_html="salida.html",   # si escribes a disco internamente, ok
-            titulo="Documento",
-            escapar_html=False,           # dejamos <img src="...">
-            separar_por_dobles_saltos=True
-        )
-        logs.append("exportar_output_a_html: OK")
-    except Exception as e:
-        logs.append(f"exportar_output_a_html: ERROR {e}")
-        # si falla exportar_output_a_html, no hay informe
-        raise
-
-    # --- Paso 6: mostrar_html (si es necesario postprocesar/renderizar)
-    try:
-        html_renderizado = mostrar_html(html_str)
-        logs.append("mostrar_html: OK")
-    except Exception as e:
-        logs.append(f"mostrar_html: ERROR {e} (usando html_str sin render)")
-        html_renderizado = mostrar_html(html_str)
-
-    # --- Paso 7: construir meta final ---
-    duracion_seg = time.time() - t0
-    print(info_plots)
-    # devolvemos (html_final, meta)
-    return html_renderizado
+        duracion = round(time.perf_counter() - t0, 4)
+        logs.append(f"ERROR general: {e}")
+        meta = {"status": "ERROR", "error": str(e), "duracion_seg": duracion, "logs": logs, "detalle": meta_detalle}
+        return "", meta

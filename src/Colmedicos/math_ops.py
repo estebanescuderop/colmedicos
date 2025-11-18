@@ -1,29 +1,29 @@
+# --- Standard library ---
+import os
+import re
+import json
+import time
+import base64
+import html
+import operator
+import tempfile
+import webbrowser
+from io import BytesIO
+from pathlib import Path
+from typing import Any, Dict, List, Tuple, Union, Optional, Callable, Literal
 
-import matplotlib.pyplot as plt
+# --- Third-party ---
 import pandas as pd
 import numpy as np
 from pandas.api.types import is_numeric_dtype, is_datetime64_any_dtype
-from typing import List, Dict, Any, Tuple, Optional
-import base64
-from io import BytesIO
+import matplotlib.pyplot as plt
 from matplotlib._pylab_helpers import Gcf
-import operator
-import os
-from openai import OpenAI
-import openai
-import time
-import json
-from pathlib import Path
-import html
-import re
-from typing import Callable, Literal
-import webbrowser
-import tempfile
 import plotly.express as px
+import openai  # (o reemplaza por: from openai import OpenAI)
+
+# --- Project-local ---
 from Colmedicos.registry import register
 
-from typing import Any, List, Dict, Union
-import numpy as np
 
 @register("suma_condicional_multiple")
 def suma_condicional_multiple(df, columna_suma, condiciones):
@@ -393,7 +393,7 @@ def _to_numeric_series(s: pd.Series) -> pd.Series:
     return pd.to_numeric(s2, errors='coerce')
 
 def _to_datetime_series(s: pd.Series) -> pd.Series:
-    return pd.to_datetime(s, errors='coerce', utc=False, infer_datetime_format=True)
+    return pd.to_datetime(s, errors='coerce', utc=False)
 
 def _coerce_for_op(series: pd.Series, op: str, val: Any):
     """
@@ -413,9 +413,9 @@ def _coerce_for_op(series: pd.Series, op: str, val: Any):
     if try_dt_series.notna().mean() >= 0.5:
         if op in _SET_OPS:
             vals = val if isinstance(val, (list, tuple, set)) else [val]
-            v = [pd.to_datetime(x, errors='coerce', utc=False, infer_datetime_format=True) for x in vals]
+            v = [pd.to_datetime(x, errors='coerce', utc=False) for x in vals]
         else:
-            v = pd.to_datetime(val, errors='coerce', utc=False, infer_datetime_format=True)
+            v = pd.to_datetime(val, errors='coerce', utc=False)
         return (try_dt_series, v, 'datetime')
 
     # Intento numérico si la serie es object pero con números como texto

@@ -24,10 +24,10 @@ import plotly.express as px
 from Colmedicos.registry import register
 from Colmedicos.config import OPENAI_API_KEY
 
-API_KEY = "***REMOVED***"  # Reemplaza por tu API key de OpenAI  # Reemplaza por tu API key de OpenAI
-instruccion = "Todo lo que no esté entre los signos ++, redactalo exactamente igual, lo que si esté, sigue las instrucciones y lo reemplazas por lo que haya originalmente entre ++: "
+API_KEY = "CLAVE"
+instruccion = "Todo lo que no esté entre los signos ++, redactalo exactamente igual, lo que si esté, sigue las instrucciones y lo reemplazas por lo que haya originalmente entre ++, adicionalmente el texto literal quitale caracteres como: *, por nada del mundo modifiques el texto que encuentres entre el caracter numeral: # y saltos de línea innecesarios.\n\n"
 client = openai.OpenAI(api_key=API_KEY)
-
+  
 @register("ask_gpt5")
 def ask_gpt5(pregunta):
     """Envía un prompt y devuelve la respuesta de GPT-5."""
@@ -35,7 +35,7 @@ def ask_gpt5(pregunta):
     respuesta = client.chat.completions.create(
         model="gpt-5",  # 👈 Aquí usas GPT-5 directamente
         messages=[
-            {"role": "system", "content": "Eres un asistente preciso y coherente con instrucciones de edición de texto."},
+            {"role": "system", "content": "Eres un asistente preciso y coherente con instrucciones de edición de texto, especificamente hablando de temas relacionados con salud ocupacional."},
             {"role": "user", "content": instruccion + pregunta}
         ]
     )
@@ -43,288 +43,264 @@ def ask_gpt5(pregunta):
     texto_respuesta = respuesta.choices[0].message.content
     return texto_respuesta
 
+import json
+from typing import List, Dict, Any, Union
+from Colmedicos.registry import register
 
-msj_grafo = """## Objetivo
-A partir de:
-- Una instrucción del usuario (español, puede tener acentos o variantes).
-- Las columnas disponibles del DataFrame.
-- Un texto de contexto adicional: IGNÓRALO. ENFÓCATE EXCLUSIVAMENTE en la instrucción delimitada entre # ... #.
+_MSJ_GRAFO_V2 = """Eres un planificador experto en visualizaciones estadísticas a partir de datos tabulares.
+Convierte instrucciones en español a parámetros técnicos de gráficas, devolviendo EXCLUSIVAMENTE JSON válido UTF-8 (sin texto adicional, sin comentarios, sin fences). La salida se usará directamente por un generador; si la salida no es JSON válido, el proceso falla.
 
-Devuelve EXCLUSIVAMENTE un JSON **válido** con los parámetros necesarios para llamar una de estas funciones:
+COLUMNAS DEL DATAFRAME (base de referencia)
+{COLUMNAS_JSON}
 
-- graficar_barras(df, xlabel, y, agg, titulo, color, ...)
-- graficar_barras_horizontal(df, xlabel, y, agg, titulo, color, ...)
-- graficar_torta(df, xlabel, y, agg, titulo, color, ...)
-- graficar_tabla(df, xlabel, y, agg, titulo, color, ...)
+La coincidencia de nombres es case-insensitive y acentos-insensitive.
 
-> Puedes añadir campos opcionales (filtros, únicos, binning, stack/apilar columnas, orden, top-N, multi-X, leyenda) descritos en “Esquema de salida” y “Reglas”.
+Empareja por similitud: prioriza coincidencias exactas; si no, usa la mejor candidata (incluye alternativas en candidates si hay ambigüedad).
 
-## Entradas
-- instruccion: "{{INSTRUCCION}}"
-- columnas: {{COLUMNAS_JSON}}   // ej.: ["edad","identificacion","genero","ventas","IMC","proveedor","categoria","fecha","riesgo_ergonomico","riesgo_quimico","riesgo_psicosocial","riesgo_biomecanico"]
+FORMATOS DE ENTRADA (dos modos)
 
-## Reglas de interpretación
-1) Tipo de gráfica → "chart_type" y "function_name"
-   - Barra(s) → chart_type="barras", function_name="graficar_barras"
-   - Barras horizontal(es) → "barras_horizontal", "graficar_barras_horizontal"
-   - Torta / Pie → "torta", "graficar_torta"
-   - Tabla → "tabla", "graficar_tabla"
-   Si no se especifica, asume barras.
+Modo SINGLE
+Contenido: un texto que puede incluir una o varias instrucciones de gráfica, cada una delimitada por # ... #.
+Si hay varias secciones #...#, debes tratarlas como múltiples gráficas y devolver un arreglo.
+Omite el texto que dice literalmente #GRAFICA#, ya que este es un valor previo a cada instrucción.
 
-2) Título → "title"
-   - Si la instrucción trae comillas ('...' o "…"), úsalo tal cual.
-   - En otro caso, sintetiza un título breve y claro.
+Modo BATCH
+Contenido: un arreglo JSON de objetos:
 
-3) Columnas → "xlabel" (categórica) y "y" (numérica o lista de numéricas)
-   - Emparejamiento case-insensitive y acentos-insensitive contra ‘columnas’.
-   - “por <col>” implica `<col>` en el eje X → `xlabel`.
-   - **Multi-X**: si el usuario pide agrupar por varias columnas (p. ej. área + sede), permite `"xlabel": ["area","sede"]` (las funciones combinarán internamente).
-   - Si NO se indica `y`, selecciona una numérica razonable; si no es posible, pon `"y": null` y `"needs_disambiguation": true`.
-   - Si NO se indica `xlabel`, elige una no numérica razonable; si no es posible, `"xlabel": null` y `"needs_disambiguation": true`.
+[
+  {"idx": 1, "prompt": "texto"},
+  {"idx": 2, "prompt": "texto"},
+  ...
+]
 
-4) Agregación → "agg"
-   - "sumatoria/suma/acumulado" → "sum"
-   - "promedio/media" → "mean"
-   - "conteo/número/cantidad" → "count"
-   - "máximo/mínimo/mediana" → "max" / "min" / "median"
-   - **Cómputos sobre únicos**:
-     - “conteo de únicos/distintos/sin duplicados de <id>” → `"agg": "distinct_count"` y `"distinct_on": "<id>"`.
-     - “sumar <métrica> considerando <id> únicos” → `"agg":"sum"` + `"distinct_on":"<id>"` (se deduplica por <id> antes de agregar).
-   - **Suma sobre valores únicos de la propia métrica**: `"agg":"sum_distinct"` (si el agregador lo soporta).
 
-5) Filtros condicionales (bloques AND/OR)
-   - Usa **dos** campos:
-     - `"conditions_all"`: lista de condiciones combinadas con AND.
-     - `"conditions_any"`: lista de **bloques** combinados con OR. Cada ítem puede ser:
-       - una condición única `["col","op","valor"]`, o
-       - un bloque AND `[[...],[...]]`.
-   - Operadores soportados: `">","<","==","!=","?>=","<=","in","not in"`.
-     - Para `"in"/"not in"` el valor debe ser **lista**.
-   - Rangos del tipo “18.5 ≤ IMC ≤ 24.9” se expresan como **dos** condiciones en el mismo bloque.
+Debes devolver un arreglo en el mismo orden, con la forma:
 
-6) **Binning / Agrupaciones por rangos**
-   - Si la instrucción pide agrupar por intervalos (p. ej., grupos etarios), incluye el bloque `"binning"`:
-     {
-       "column": "edad",                  // columna fuente a trocear
-       "bins":   [lim1, lim2, ..., limN], // límites (pueden ser -inf y +inf)
-       "labels": ["r1","r2",...],         // etiquetas en el mismo orden
-       "output_col": "grupo_edad"         // opcional; si falta, se crea "<column>_bucket"
-     }
+[
+  {"idx": <id>, "params": { ...objeto del esquema... }},
+  ...
+]
+
+
+Nunca repitas la lista de columnas dentro de cada elemento.
+Nunca devuelvas texto fuera del JSON.
+
+REGLAS DE INTERPRETACIÓN
+
+A. Detección del tipo de gráfica → (chart_type, function_name)
+
+“barras”, “de barras”, “columnas” → ("barras","graficar_barras")
+
+“barras horizontales”, “horizontales” → ("barras_horizontal","graficar_barras_horizontal")
+
+“torta”, “pie”, “pastel” → ("torta","graficar_torta")
+
+“tabla”, “cuadro”, “listado” → ("tabla","graficar_tabla")
+Si no se especifica, asume barras.
+
+B. Título (title)
+
+Si aparece entre comillas simples o dobles, úsalo literal.
+
+Si no, sintetiza un título breve y claro.
+
+C. Columnas (xlabel, y)
+
+xlabel: categórica (string o lista de strings para multi-X: “por sede y área”).
+
+y: métrica(s) numérica(s) o la columna sobre la que se aplica la agregación (string o lista).
+
+Empareja nombres contra {COLUMNAS_JSON} con normalización (sin acentos/case) y similitud.
+
+Si hay ambigüedad o no existe, coloca null y marca "needs_disambiguation": true, proponiendo alternativas en "candidates".
+
+D. Agregación (agg, y extensiones)
+Mapea términos comunes:
+
+suma/sumatoria/acumulado → "sum"
+
+promedio/media → "mean"
+
+conteo/número/cantidad → "count"
+
+máximo/mínimo/mediana → "max"|"min"|"median"
+
+conteo único/distinto → "distinct_count" y define "distinct_on" con la columna identificadora (p. ej. “identificación”, “id”, “documento”).
+
+suma sobre valores únicos → "sum_distinct"
+Si no se indica agregación, por defecto "sum" si y es numérica; de lo contrario, "count".
+
+E. Filtros (conditions_all, conditions_any)
+
+Operadores: >, <, >=, <=, ==, !=, in, not in.
+
+conditions_all: lista de condiciones AND.
+
+conditions_any: OR de condiciones o de bloques AND.
+      - una condición única `["col","op","valor"]`, o
+      - un bloque AND `[[...],[...]]`.
+
+F. Binning (binning)
+Si se pide agrupar por rangos:
+
+"binning": {
+  "column": "<col>",
+  "bins": ["-inf", 5, 11, 18, 59, "+inf"],
+  "labels": ["0-5","6-11","12-18","19-59","60+"],
+  "output_col": "grupo"
+}
    - Cuando se define `binning`, **el `xlabel` debe ser el nombre del bucket** (`output_col` o el auto-generado).
+   - output_col debe ser el xlabel a usar (o se debe setear xlabel con ese valor).
+   - No repetir ni cruzar rangos (sin solapes).
+   - Si la categoría depende de múltiples condiciones o columnas, NO usar binning
+   - Se debe producir una estructura válida de bins/labels (mismo número, cubriendo todo el rango), ejemplos:
+   - Cuando existe binning, xlabel = output_col.
 
-7) **Stack / Apilar columnas → un eje X común**
-   - Si el usuario pide armar el eje X a partir de **múltiples columnas** (p. ej., varios tipos de riesgo como “riesgo_ergonomico”, “riesgo_quimico”…), usa `"stack_columns"`:
-     {
-       "columns": ["colA","colB","colC"], // columnas a apilar
-       "output_col": "nombre_eje_x",      // nombre de la nueva columna categórica (obligatorio si quieres controlarlo)
-       "value_col": "valor",              // nombre de la columna con valores apilados (por defecto "valor")
-       "keep_value": "si",                // opcional: filtra las filas apiladas por este valor exacto
-       "label_map": { "colA":"Etiqueta A", "colB":"Etiqueta B" } // opcional: renombra etiquetas del eje
-     }
-   - Cuando se define `stack_columns`, **el `xlabel` debe ser `output_col`** (o el nombre por defecto si no se especifica).
+G. Apilamiento de columnas (stack_columns)
+- Si el usuario pide armar el eje X a partir de **múltiples columnas** (p. ej., varios tipos de riesgo como “riesgo_ergonomico”, “riesgo_quimico”…), usa:
+"stack_columns": {
+  "columns": ["colA","colB",...],
+  "output_col": "string",
+  "value_col": "string|null",
+  "keep_value": "any|null",
+  "label_map": { "colA":"Nombre legible", ... } | null
+}
+    - Cuando se define `stack_columns`, **el `xlabel` debe ser `output_col`** (o el nombre por defecto si no se especifica).
 
-8) Series múltiples y torta
-   - En barras y barras horizontales, `y` puede ser lista (múltiples series).
-   - En torta, se espera una sola serie (una métrica agregada por `xlabel`).
+H. Orden y Top-N
 
-9) Colores y leyenda (opcionales)
-   - `"color"` puede ser:
-     - string (un color): "steelblue", "#25347a", etc.
-     - lista de strings (uno por serie/rebanada).
-   - `"colors_by_category"` (opcional) mapea color por etiqueta de `xlabel`.
-   - `"show_legend": true|false` para mostrar/ocultar leyenda (por defecto, true si hay múltiples series).
-   - `"legend_title": "string|null"` para titular la leyenda (si aplica).
+"sort": {"by":"y"|"label","order":"asc"|"desc"}
+"limit_categories": <n>
 
-10) Orden y top-N (opcionales)
-   - `"sort": {"by": "y" | "label", "order": "asc" | "desc"}`
-     - Con múltiples series, `"by":"y"` aplica al total/primera serie (elige razonablemente).
-   - `"limit_categories": number` para top-N (aplícalo tras ordenar).
 
-11) Control de unicidad y deduplicación previa
+I. Leyenda y valores
+
+"show_legend": true|false
+"show_values": true|false
+
+
+J. Colores
+
+"color": string | [string] | null
+"colors_by_category": { "Etiqueta":"#RRGGBB", ... } | null
+
+
+K. Deduplicación previa
+
+"unique_by": "string|[string]"
+"drop_dupes_before_sum": true|false
+
+
+L. Multi-gráficas en SINGLE
+Si hay varias secciones # ... #, produce:
+
+[
+  {"idx": 1, "params": {...}},
+  {"idx": 2, "params": {...}},
+  ...
+]
+
+
+M. Control de unicidad y deduplicación previa
    - `"distinct_on": "col|[colA,colB]"` define la clave de unicidad de “entidades” (p. ej., personas).
    - `"drop_dupes_before_sum": true|false` permite deduplicar por `(xlabel, distinct_on)` antes de sumar/promediar.
    - `"unique_by": "col|[colA,colB]"` permite deduplicar filas antes de cualquier cálculo.
 
-12) Validación frente a 'columnas'
+   
+N. Validación frente a 'columnas'
    - Si un nombre no coincide, deja el campo en null y marca:
      `"needs_disambiguation": true`, proponiendo alternativas en `"candidates"`.
 
-13) Salida: SOLO JSON válido UTF-8, sin comentarios ni texto adicional.
+O. Salida: SOLO JSON válido UTF-8, sin comentarios ni texto adicional.
 
-## Esquema de salida (JSON)
+P. Todo lo que sea nule reemplazar en el json final por null, todo lo que sea true reemplazar por true y todo lo que sea false reemplazar por false.
+
+Q. Definición del parámetro span (opcional, si la estructura lo incluye):
+  -El parámetro span representa el rango exacto de posiciones dentro del texto original (conteo de caracteres) desde el cual se extrajo la instrucción o descripción que dio origen a una gráfica.
+  -Se define como una lista de dos valores enteros [inicio, fin], donde:
+      - inicio: indica la posición (índice) del primer carácter de la instrucción dentro de la cadena completa analizada.
+      - fin: indica la posición inmediatamente posterior al último carácter de esa misma instrucción.
+  -Este rango permite referenciar con precisión el fragmento textual original que dio contexto a la instrucción del gráfico.
+
+R. Omite el texto que dice literalmente #GRAFICA#, ya que este es un valor previo a cada instrucción.
+
+ESQUEMA DE SALIDA (obligatorio por cada gráfica)
+ - Devolver exclusivamente los parametros indicados en este esquema, no devolver nada por fuera de esta estructura, no inventes columnas a menos que estén explicitamente indicadas en {COLUMNAS_JSON}.
 {
-  "chart_type": "barras" | "barras_horizontal" | "torta" | "tabla",
-  "function_name": "graficar_barras" | "graficar_barras_horizontal" | "graficar_torta" | "graficar_tabla",
-  "title": "string",
-  "xlabel": "string | string[] | null",
-  "y": "string | string[] | null",
-  "agg": "sum" | "mean" | "count" | "max" | "min" | "median" | "distinct_count" | "sum_distinct",
-  "distinct_on": "string | string[] | null",
+  "chart_type": "...",
+  "function_name": "...",
+  "title": "...",
+  "xlabel": string | [string] | null,
+  "y": string | [string] | null,
+  "agg": "...",
+  "distinct_on": string | [string] | null,
   "drop_dupes_before_sum": true | false | null,
-  "unique_by": "string | string[] | null",
-  "conditions_all": [ ["col","op",valor], ... ],
-  "conditions_any": [
-    ["col","op",valor],
-    [["col","op",v],["col","op",v]]
-  ],
-  "binning": {
-    "column": "string",
-    "bins": [number|"-inf"|"+inf", ...],
-    "labels": ["string", ...],
-    "output_col": "string|null"
-  } | null,
-  "stack_columns": {
-    "columns": ["string", ...],
-    "output_col": "string",
-    "value_col": "string" | null,
-    "keep_value": "any" | null,
-    "label_map": { "string":"string", ... } | null
-  } | null,
-  "color": "string | string[] | null",
-  "colors_by_category": { "Etiqueta":"#RRGGBB", ... } | null,
+  "unique_by": string | [string] | null,
+  "conditions_all": [...],
+  "conditions_any": [...],
+  "binning": { ... } | null,
+  "stack_columns": { ... } | null,
+  "color": string | [string] | null,
+  "colors_by_category": { ... } | null,
   "show_legend": true | false | null,
-  "legend_title": "string | null",
-  "sort": { "by":"y"|"label", "order":"asc"|"desc" } | null,
+  "show_values": true | false | null,
+  "sort": { ... } | null,
   "limit_categories": number | null,
   "needs_disambiguation": true | false,
-  "candidates": { "xlabel": string[], "y": string[] }
+  "candidates": { "xlabel": [...], "y": [...] }
 }
 
-## Ejemplos
 
-### Ejemplo 1 — Barras horizontales con grupos etarios y conteo único
-instruccion: # gráfico de barras horizontales llamado 'Personas por grupos etarios' que utilice la columna de edad para la siguiente agrupación por rangos: (total_0_y_5, total_6_y_11, total_12_y_18, total_19_y_26, total_27_y_59, total_mayores_60) y la columna identificacion para hacer un conteo de personas únicas #
-columnas: ["edad","identificacion","genero"]
-→
-{
-  "chart_type": "barras_horizontal",
-  "function_name": "graficar_barras_horizontal",
-  "title": "Personas por grupos etarios",
-  "xlabel": "grupo_edad",
-  "y": "identificacion",
-  "agg": "distinct_count",
-  "distinct_on": "identificacion",
-  "drop_dupes_before_sum": false,
-  "unique_by": null,
-  "conditions_all": [],
-  "conditions_any": [],
-  "binning": {
-    "column": "edad",
-    "bins":   ["-inf", 5, 11, 18, 26, 59, "+inf"],
-    "labels": [
-      "total_0_y_5",
-      "total_6_y_11",
-      "total_12_y_18",
-      "total_19_y_26",
-      "total_27_y_59",
-      "total_mayores_60"
-    ],
-    "output_col": "grupo_edad"
-  },
-  "stack_columns": null,
-  "color": null,
-  "colors_by_category": null,
-  "show_legend": false,
-  "legend_title": null,
-  "sort": { "by": "label", "order": "asc" },
-  "limit_categories": null,
-  "needs_disambiguation": false,
-  "candidates": { "xlabel": [], "y": [] }
-}
 
-### Ejemplo 2 — Torta con filtro y top-N
-instruccion: # pie chart del total de ventas por categoría solo 2025, mostrar top 5 #
-columnas: ["categoria","ventas","anio"]
-→
-{
-  "chart_type": "torta",
-  "function_name": "graficar_torta",
-  "title": "Ventas por categoría (2025)",
-  "xlabel": "categoria",
-  "y": "ventas",
-  "agg": "sum",
-  "distinct_on": null,
-  "drop_dupes_before_sum": false,
-  "unique_by": null,
-  "conditions_all": [["anio","==",2025]],
-  "conditions_any": [],
-  "binning": null,
-  "stack_columns": null,
-  "color": null,
-  "colors_by_category": null,
-  "show_legend": true,
-  "legend_title": null,
-  "sort": { "by": "y", "order": "desc" },
-  "limit_categories": 5,
-  "needs_disambiguation": false,
-  "candidates": { "xlabel": [], "y": [] }
-}
 
-### Ejemplo 3 — Barras con múltiples series y colores
-instruccion: # barras por región comparando ventas y costos, ordenar ascendente por etiqueta, colores azul y verde #
-columnas: ["region","ventas","costos"]
-→
-{
-  "chart_type": "barras",
-  "function_name": "graficar_barras",
-  "title": "Ventas y costos por región",
-  "xlabel": "region",
-  "y": ["ventas","costos"],
-  "agg": "sum",
-  "distinct_on": null,
-  "drop_dupes_before_sum": false,
-  "unique_by": null,
-  "conditions_all": [],
-  "conditions_any": [],
-  "binning": null,
-  "stack_columns": null,
-  "color": ["steelblue","seagreen"],
-  "colors_by_category": null,
-  "show_legend": true,
-  "legend_title": "Métricas",
-  "sort": { "by": "label", "order": "asc" },
-  "limit_categories": null,
-  "needs_disambiguation": false,
-  "candidates": { "xlabel": [], "y": [] }
-}
+Para SINGLE con varias gráficas o BATCH, siempre devolver:
 
-### Ejemplo 4 — Multi-X (dos columnas en el eje)
-instruccion: # barras por sede y área sumando ventas #
-columnas: ["sede","area","ventas"]
-→
-{
-  "chart_type": "barras",
-  "function_name": "graficar_barras",
-  "title": "Ventas por sede y área",
-  "xlabel": ["sede","area"],
-  "y": "ventas",
-  "agg": "sum",
-  "distinct_on": null,
-  "drop_dupes_before_sum": false,
-  "unique_by": null,
-  "conditions_all": [],
-  "conditions_any": [],
-  "binning": null,
-  "stack_columns": null,
-  "color": null,
-  "colors_by_category": null,
-  "show_legend": false,
-  "legend_title": null,
-  "sort": { "by": "y", "order": "desc" },
-  "limit_categories": null,
-  "needs_disambiguation": false,
-  "candidates": { "xlabel": [], "y": [] }
-}
+[
+  {"idx": <id_o_orden>, "params": {...}},
+  ...
+]
 
-### Ejemplo 5 — **Apilar columnas de riesgo** + conteo de personas únicas
-instruccion: # Grafica de barras llamada 'Tipo de riesgo' con un conteo de registros únicos de identificación, y los siguientes ejes x: riesgo ergonómico="si", riesgo quimico="si", riesgo psicosocial="si", riesgo biomecanico="si" #
-columnas: ["identificacion","riesgo_ergonomico","riesgo_quimico","riesgo_psicosocial","riesgo_biomecanico"]
-→
+start: corresponde a la posición inicial.
+end: corresponde al número de caracteres final de la instrucción original.
+NO DEVOLVER NADA FUERA DEL/LOS JSON.
+
+SINÓNIMOS Y PATRONES ÚTILES
+
+“conteo único de (personas|registros|identificación|id|documento)”
+→ "agg": "distinct_count", "distinct_on": "<col identificadora>"
+
+“clasificación por / según / dividido por / por categoría”
+→ asigna xlabel
+
+“por X y Y”
+→ multi-X: xlabel = ["X","Y"]
+
+“solo 2025”, “estado activo”, “categoría A”
+→ condiciones → conditions_all
+
+“top N”, “primeros N”, “mayores N”
+→ sort + limit_categories
+
+“apilar / stack / unir varias columnas en un eje x”
+→ stack_columns
+
+“mostrar valores / etiquetas / sin leyenda”
+→ show_values, show_legend
+
+EJEMPLO CLAVE
+
+Entrada:
+
+# Gráfica de tabla con el nombre 'Espirometria' con el conteo único de personas por identificación con la clasificación de xlabel de la columna de Espirometria #
+
+
+Salida:
+
 {
-  "chart_type": "barras",
-  "function_name": "graficar_barras",
-  "title": "Tipo de riesgo",
-  "xlabel": "tipo_riesgo",
+  "chart_type": "tabla",
+  "function_name": "graficar_tabla",
+  "title": "Espirometria",
+  "xlabel": "Espirometria",
   "y": "identificacion",
   "agg": "distinct_count",
   "distinct_on": "identificacion",
@@ -333,120 +309,113 @@ columnas: ["identificacion","riesgo_ergonomico","riesgo_quimico","riesgo_psicoso
   "conditions_all": [],
   "conditions_any": [],
   "binning": null,
-  "stack_columns": {
-    "columns": ["riesgo_ergonomico","riesgo_quimico","riesgo_psicosocial","riesgo_biomecanico"],
-    "output_col": "tipo_riesgo",
-    "value_col": "valor",
-    "keep_value": "si",
-    "label_map": {
-      "riesgo_ergonomico": "Ergonómico",
-      "riesgo_quimico": "Químico",
-      "riesgo_psicosocial": "Psicosocial",
-      "riesgo_biomecanico": "Biomecánico"
-    }
-  },
+  "stack_columns": null,
   "color": null,
   "colors_by_category": null,
   "show_legend": false,
-  "legend_title": null,
-  "sort": { "by": "y", "order": "desc" },
+  "show_values": false,
+  "sort": null,
   "limit_categories": null,
   "needs_disambiguation": false,
   "candidates": { "xlabel": [], "y": [] }
 }
+
+
+Si hubiera varias instrucciones:
+
+[
+  {"idx": 1, "params": {...}},
+  {"idx": 2, "params": {...}},
+]
+
+FIN. SOLO JSON.
+
+Ejecución: Con base en la siguiente {INSTRUCCION} y las columnas {COLUMNAS_JSON}, interpreta y devuelve los parámetros técnicos en JSON.
 """
 
+def _strip_code_fences(s: str) -> str:
+    s = s.strip()
+    if s.startswith("```"):
+        # remove first fence line
+        s = s.split("```", 2)
+        if len(s) >= 3:
+            # s = ["", "json or lang", "body..."]
+            return s[2].strip()
+        return s[-1].strip()
+    return s
 
+def _json_loads_loose(s: str) -> Any:
+    s = _strip_code_fences(s)
+    try:
+        return json.loads(s)
+    except Exception:
+        # intento simple: localizar el primer '[' o '{' y recortar
+        first = min((i for i in [s.find("["), s.find("{")] if i != -1), default=-1)
+        last = max(s.rfind("]"), s.rfind("}"))
+        if first != -1 and last != -1 and last > first:
+            return json.loads(s[first:last+1])
+        raise
 
 @register("graficos_gpt5")
-def graficos_gpt5(df, pregunta):
-    """Envía un prompt y devuelve la respuesta de GPT-5."""
-    time.sleep(3)
-    
-    # Extraer nombres de columnas
+def graficos_gpt5(df, pregunta: Union[str, List[Dict[str, Any]]]) -> Union[Dict[str, Any], List[Dict[str, Any]]]:
+    """
+    Retro-compatible:
+    - Si `pregunta` es str => devuelve UN dict de params.
+    - Si `pregunta` es list[{'id':int,'instruccion':str}] => devuelve
+      UNA lista [{'id':int,'params':{...}}, ...] en el MISMO orden.
+    """
     columnas = df.columns.tolist()
-    
-    subprompt = (
-    msj_grafo
-    .replace("{INSTRUCCION}", pregunta)
-    .replace("{COLUMNAS_JSON}", json.dumps(columnas, ensure_ascii=False))
-)
-    
+    payload_cols = json.dumps(columnas, ensure_ascii=False)
+
+    subprompt = _MSJ_GRAFO_V2.replace("{COLUMNAS_JSON}", payload_cols).replace("{INSTRUCCION}", str(pregunta))
+    time.sleep(6)
     respuesta = client.chat.completions.create(
-        model="gpt-5",  # 👈 Aquí usas GPT-5 directamente
-        messages=[
-            {"role": "system", "content": "Eres un analista que extrae parámetros para construir gráficas a partir de una instrucción en lenguaje natural y una lista de columnas disponibles de un DataFrame de pandas."},
+    model="gpt-5",  # 👈 Aquí usas GPT-5 directamente
+    messages=[
+            {"role": "system", "content": "Eres un experto en análisis de datos y tu trabajo es interpretar textos y extraer las instrucciones precisas de acuerdo a las columnas de un dataframe"},
             {"role": "user", "content": subprompt}
         ]
     )
 
     texto_respuesta = respuesta.choices[0].message.content
-    params = json.loads(texto_respuesta)
-    return params
+
+    return texto_respuesta
+
+    # modo batch → lista de {id, params}
+    if not isinstance(data, list):
+        raise ValueError("Se esperaba un arreglo JSON en modo batch.")
+    # normalizaciones por cada item
+    for item in data:
+        params = item.get("params", {})
+        if isinstance(params.get("y"), list) and params.get("function_name") == "graficar_torta":
+            params["y"] = params["y"][0] if params["y"] else null
+        if not params.get("agg"):
+            params["agg"] = "sum"
+        item["params"] = params
+    # mantener orden por id tal como llegó
+    id_order = [int(it["id"]) for it in pregunta]
+    data.sort(key=lambda d: id_order.index(int(d["id"])) if int(d["id"]) in id_order else 10**9)
+    return data
+
+
 
 MSJ_OPS = """
-Eres un analista de datos. A partir de una instrucción en español y una lista de columnas de un DataFrame de pandas,
-debes devolver EXCLUSIVAMENTE un JSON válido con una especificación de MÚLTIPLES operaciones a ejecutar sobre el DataFrame.
-Trabaja EXCLUSIVAMENTE con la instrucción que se encuentre entre ||
+Eres un analista de datos. A partir de una o varias instrucciones en español (cada una delimitada por || ... ||) y una lista de columnas de un DataFrame de pandas,
+debes devolver EXCLUSIVAMENTE un arreglo JSON válido con especificaciones de MÚLTIPLES operaciones a ejecutar sobre el DataFrame.
+Cada instrucción delimitada por || corresponde a un objeto dentro del arreglo final.
 
-El JSON debe incluir:
-- "operations": lista de operaciones independientes (cada una con su propia columna/condiciones/alias).
-- "group_by": null, string o lista de strings para agrupar resultados (opcional).
+El JSON debe ser un arreglo con esta forma:
 
-Operaciones disponibles (operations[i].op):
-- Básicas por columna:
-  "sum" | "count" | "avg" | "min" | "max" | "distinct_count"
-- Nuevas (para únicos):
-"distinct_sum" → suma de una columna tras eliminar duplicados por una o varias llaves.
-También puedes usar cualquier op simple (sum, count, avg, etc.) con el modificador opcional dedupe_by para pedir “quitar duplicados antes de calcular”.
-- Avanzadas:
-  "ratio" (numerator/denominator con condiciones propias)
-  "weighted_avg" (promedio ponderado con columna de pesos)
-- (Opcionalmente puedes mapear frases comunes a estas ops: 
-  suma/total -> sum; contar/número de -> count; promedio/media -> avg; 
-  mínimo -> min; máximo -> max; únicos/distintos -> distinct_count; 
-  porcentaje/tasa = ratio o avg con multiplicador externo si aplica)
+[
+  {"idx": 1, "params": { ... }},
+  {"idx": 2, "params": { ... }},
+  ...
+]
 
-Campos por operación (además de los ya existentes):
-- dedupe_by: ["colA", "colB", ...] (opcional, nuevo):
-    - Si existe, antes de calcular la métrica, eliminar duplicados usando esas columnas como clave (equivalente a drop_duplicates(subset=dedupe_by)).
-    - Útil para “sumatoria de valores únicos” o “conteo único de personas dentro de condiciones”.
+Dentro de cada `params`, usa exactamente la siguiente estructura (idéntica a la del esquema de salida original).
 
-- conditions_logic: "AND" | "OR" (opcional, nuevo; por defecto "AND"):
-    - Define cómo combinar las condiciones de conditions (si se usa ese campo).
-
-- condition_groups: [ { "conditions":[...], "logic":"AND|OR" }, ... ] (opcional, nuevo):
-    - Permite expresar lógicas más complejas del tipo (A AND B) OR (C AND D).
-    - Regla: si se especifica condition_groups, el agente no debe usar conditions plano en esa misma operación.
-
-Nota: Para conteo de personas únicas usa op: "distinct_count", column: "IdPersona" y si además necesitas filtrar, agrega conditions o condition_groups.
-Para sumatoria única (p. ej., sumar el “Monto” por “FacturaID” único), usa op: "distinct_sum", column: "Monto", dedupe_by: ["FacturaID"].  
-
-
-Reglas:
-1) Interpreta la instrucción y desglósala en una o más operaciones. 
-   Si el usuario pide “por región” o “por categoría”, usa "group_by" con esos nombres de columnas.
-2) Cada operación DEBE tener "alias" para nombrar la métrica resultante.
-3) Valida que todas las columnas referidas existan en 'columnas'. Si hay ambigüedad, usa "needs_disambiguation": true y propone alternativas en "candidates".
-4) Condiciones: usa una lista de tuplas/objetos con (columna, operador, valor). Operadores soportados: 
-   ">", "<", "==", "!=", ">=", "<=", "in", "not in". 
-   Para "in"/"not in" el valor debe ser lista.
-5) Para "count", por defecto cuenta NO nulos en la columna indicada. Si se requiere contar nulos, agrega "count_nulls": true.
-6) Para "avg" o "sum", convierte a numérico implícitamente (coerción), ignorando NaN (equivalente a skipna=True).
-7) Para "ratio":
-   - Debes especificar "numerator" y "denominator", cada uno con "column" y "conditions" propias.
-   - Usa "safe_div0" para definir el valor a retornar si el denominador es 0 (por defecto null/NaN).
-8) Para "weighted_avg":
-   - "column": valores, "weights": columna de pesos, "conditions": condiciones del subconjunto (opcional).
-   - Usa "safe_div0" si la suma de pesos es 0 (por defecto null/NaN).
-9) Si el usuario no pide agrupación, "group_by": null.
-10) Al mapear frases del usuario:
-    - “personas únicas”, “sin duplicados”, “únicos por …” → usar distinct_count o añadir dedupe_by a la operación.
-    - “sumatoria única”, “sumar una vez por …” → usar distinct_sum o sum con dedupe_by.
-11) Si el usuario pide agrupación (“por región/proveedor/mes…”), usar "group_by" (string o lista).
-12) Si el usuario expresa rangos (p. ej., IMC), descompón en múltiples operaciones con condiciones
-
-Salida: SOLO JSON válido UTF-8 (sin texto extra), con esta forma:
+---
+## FORMATO DE CADA ELEMENTO (params)
 
 {
   "operations": [
@@ -461,7 +430,7 @@ Salida: SOLO JSON válido UTF-8 (sin texto extra), con esta forma:
         { "conditions": [["col","op","valor"], ...], "logic": "AND|OR" }
       ],
 
-      "dedupe_by": ["colA","colB"],         // NUEVO (opcional)
+      "dedupe_by": ["colA","colB"],         // opcional
       "count_nulls": true|false,            // solo "count"
 
       "numerator":   { "column":"string", "conditions":[["col","op","valor"]], "conditions_logic":"AND|OR" },
@@ -475,55 +444,101 @@ Salida: SOLO JSON válido UTF-8 (sin texto extra), con esta forma:
   "candidates": { "columns": [], "group_by": [], "by_operation": [] }
 }
 
+---
+## INSTRUCCIONES DE INTERPRETACIÓN
 
-Ejemplos:
+1. Cada bloque || ... || representa una instrucción independiente y debe generar un objeto:
+   {"idx": <número>, "params": { ...estructura anterior... }}
 
-# 1) “Suma de Ventas y conteo de Pedidos para la Categoría B”
-{
-  "operations": [
-    {"op":"sum",   "column":"Ventas",   "conditions":[["Categoria","==","B"]], "alias":"ventas_B"},
-    {"op":"count", "column":"PedidoID", "conditions":[["Categoria","==","B"]], "alias":"n_pedidos_B"}
-  ],
-  "group_by": null,
-  "needs_disambiguation": false,
-  "candidates": { "columns": [], "group_by": [], "by_operation": [] }
-}
+2. El índice `idx` debe incrementarse secuencialmente (1, 2, 3, ...).
 
-# 2) “Sumatoria única del Monto por Factura (evitar duplicados por FacturaID) solo 2025”
-{
-  "operations": [
-    {
-      "op": "distinct_sum",
-      "alias": "monto_unico_2025",
-      "column": "Monto",
-      "dedupe_by": ["FacturaID"],
-      "conditions": [["Anio", "==", 2025]]
-    }
-  ],
-  "group_by": null,
-  "needs_disambiguation": false,
-  "candidates": { "columns": [], "group_by": [], "by_operation": [] }
-}
+3. En modo SINGLE (un texto con varias instrucciones ||...||):
+   devuelve un arreglo con todos los objetos en orden de aparición.
 
-# 3) “IMC por rangos (buckets): contar personas por categoría”
-{
-  "operations": [
-    {"op":"count","alias":"bajo_peso","column":"IdPersona","conditions":[["IMC","<",18.5]]},
-    {"op":"count","alias":"peso_normal","column":"IdPersona","conditions":[["IMC",">=",18.5],["IMC","<=",24.9]]},
-    {"op":"count","alias":"sobrepeso","column":"IdPersona","conditions":[["IMC",">=",25.0],["IMC","<=",29.9]]},
-    {"op":"count","alias":"obesidad_I","column":"IdPersona","conditions":[["IMC",">=",30.0],["IMC","<=",34.9]]},
-    {"op":"count","alias":"obesidad_II","column":"IdPersona","conditions":[["IMC",">=",35.0],["IMC","<=",39.9]]},
-    {"op":"count","alias":"obesidad_III","column":"IdPersona","conditions":[["IMC",">",40.0]]}
-  ],
-  "group_by": null,
-  "needs_disambiguation": false,
-  "candidates": { "columns": [], "group_by": [], "by_operation": [] }
-}
+4. En modo BATCH (si la entrada ya es un arreglo con prompts):
+   conserva el mismo `idx` y orden de los elementos.
 
-Entradas:
-- instruccion: "{INSTRUCCION}"
-- columnas: {COLUMNAS_JSON}
+5. No repitas la lista de columnas dentro de cada objeto.  
+   Usa las columnas provistas globalmente: {COLUMNAS_JSON}.
+
+6. Todos los valores nulos, verdaderos y falsos deben expresarse como JSON válido:
+   - null → null  
+   - true → true  
+   - false → false  
+
+7. Si se detecta ambigüedad, deja `"needs_disambiguation": true` e incluye `"candidates"` con alternativas.
+
+8. NO devuelvas texto adicional, explicaciones, comentarios ni fences Markdown.
+   SOLO JSON válido UTF-8 con el arreglo final.
+
+9. Interpreta la instrucción y desglósala en una o más operaciones. 
+   Si el usuario pide “por región” o “por categoría”, usa "group_by" con esos nombres de columnas.
+
+10. Condiciones: usa una lista de tuplas/objetos con (columna, operador, valor). Operadores soportados: 
+   ">", "<", "==", "!=", ">=", "<=", "in", "not in". 
+   Para "in"/"not in" el valor debe ser lista.
+
+11. Para "count", por defecto cuenta NO nulos en la columna indicada. Si se requiere contar nulos, agrega "count_nulls": true.
+
+12. Para "avg" o "sum", convierte a numérico implícitamente (coerción), ignorando NaN (equivalente a skipna=true).
+
+13. Al mapear frases del usuario:
+    - “personas únicas”, “sin duplicados”, “únicos por …” → usar distinct_count o añadir dedupe_by a la operación.
+    - “sumatoria única”, “sumar una vez por …” → usar distinct_sum o sum con dedupe_by.
+
+14. Columnas → "xlabel" (categórica) y "y" (numérica o lista de numéricas)
+   - Emparejamiento case-insensitive y acentos-insensitive contra ‘columnas’.
+   - “por <col>” implica `<col>` en el eje X → `xlabel`.
+   - **Multi-X**: si el usuario pide agrupar por varias columnas (p. ej. área + sede), permite `"xlabel": ["area","sede"]` (las funciones combinarán internamente).
+   - Si NO se indica `y`, selecciona una numérica razonable; si no es posible, pon `"y": null` y `"needs_disambiguation": true`.
+   - Si NO se indica `xlabel`, elige una no numérica razonable; si no es posible, `"xlabel": null` y `"needs_disambiguation": true`.
+
+15. Filtros condicionales (bloques AND/OR)
+   - Usa **dos** campos:
+     - `"conditions_all"`: lista de condiciones combinadas con AND.
+     - `"conditions_any"`: lista de **bloques** combinados con OR. Cada ítem puede ser:
+       - una condición única `["col","op","valor"]`, o
+       - un bloque AND `[[...],[...]]`.
+   - Operadores soportados: `">","<","==","!=","?>=","<=","in","not in"`.
+     - Para `"in"/"not in"` el valor debe ser **lista**.
+   - Rangos del tipo “18.5 ≤ IMC ≤ 24.9” se expresan como **dos** condiciones en el mismo bloque.
+
+---
+## EJEMPLO MULTIPLE
+
+Entrada:
+
+|| Suma de Ventas y conteo de Pedidos para la Categoría B ||
+|| Promedio ponderado del Precio por Producto según cantidad vendida ||
+
+Salida esperada:
+
+[
+  {"idx": 1, "params": {
+    "operations": [
+      {"op":"sum",   "column":"Ventas",   "conditions":[["Categoria","==","B"]], "alias":"ventas_B"},
+      {"op":"count", "column":"PedidoID", "conditions":[["Categoria","==","B"]], "alias":"n_pedidos_B"}
+    ],
+    "group_by": null,
+    "needs_disambiguation": false,
+    "candidates": { "columns": [], "group_by": [], "by_operation": [] }
+  }},
+  {"idx": 2, "params": {
+    "operations": [
+      {"op":"weighted_avg", "column":"Precio", "weights":"Cantidad", "alias":"promedio_ponderado_precio"}
+    ],
+    "group_by": "Producto",
+    "needs_disambiguation": false,
+    "candidates": { "columns": [], "group_by": [], "by_operation": [] }
+  }}
+]
+
+FIN. SOLO JSON.
+
+
+Ejecución: Con base en la siguiente {INSTRUCCION} y las columnas {COLUMNAS_JSON}, interpreta y devuelve los parámetros técnicos en JSON.
 """
+
 @register("operaciones_gpt5")
 def operaciones_gpt5(df, pregunta):
     """Envía un prompt y devuelve la respuesta de GPT-5."""
@@ -531,15 +546,11 @@ def operaciones_gpt5(df, pregunta):
     
     # Extraer nombres de columnas
     columnas = df.columns.tolist()
-    
-    subprompt = (
-    MSJ_OPS
-    .replace("{INSTRUCCION}", pregunta)
-    .replace("{COLUMNAS_JSON}", json.dumps(columnas, ensure_ascii=False))
-)
-    
+    payload_cols = json.dumps(columnas, ensure_ascii=False)
+    subprompt = (MSJ_OPS.replace("{COLUMNAS_JSON}", payload_cols).replace("{INSTRUCCION}", str(pregunta)))
+    time.sleep(6)
     respuesta = client.chat.completions.create(
-        model="gpt-5",  # 👈 Aquí usas GPT-5 directamente
+        model="gpt-4.1-mini",  # 👈 Aquí usas GPT-5 directamente
         messages=[
             {"role": "system", "content": "Eres un analista que extrae parámetros para realizar calculos a partir de una instrucción en lenguaje natural y una lista de columnas disponibles de un DataFrame de pandas."},
             {"role": "user", "content": subprompt}
@@ -550,3 +561,48 @@ def operaciones_gpt5(df, pregunta):
     params = json.loads(texto_respuesta)
     return params
 
+
+
+
+clasificador = """Eres un clasificador determinista por reglas.
+Tu tarea es asignar exactamente UNA etiqueta entre las permitidas, usando los criterios recibidos.
+
+Instrucciones:
+1) Lee los CRITERIOS (diccionario cuyas claves son las etiquetas permitidas).
+2) Lee el REGISTRO (objeto con los campos de una fila).
+3) Aplica los criterios con lógica literal (Y/AND, O/OR, NO/NOT, comparaciones, contiene, empieza/termina, igualdad, números, fechas si vienen normalizadas).
+4) Si varios criterios coinciden, gana el que aparezca PRIMERO en el orden de las claves recibidas.
+5) Si ninguno coincide, asigna el último criterio que sea explícitamente “resto/caso por defecto”; si no existe, asigna la ÚLTIMA clave de la lista.
+6) NO EXPLIQUES. NO DES FORMATO. NO AGREGUES TEXTO EXTRA.
+7) SALIDA: devuelve ÚNICAMENTE una de las etiquetas permitidas, exactamente como aparece en las claves de CRITERIOS (sin comillas, sin espacios extra, sin saltos).
+
+Debes ser estricto y consistente. No inventes campos. Si un dato no está, trátalo como “no disponible”.
+
+Ejemplo criterios:
+{
+  "concepto1": "Se clasifica si 'diagnostico' contiene 'hipertensión' y 'edad' >= 40",
+  "concepto2": "Se clasifica si 'imc' >= 30 o 'diagnostico' contiene 'obesidad'",
+  "concepto3": "Resto de casos"
+}
+
+Respuesta etiqueta:
+concepto1
+
+Con base en {Criterios} y el siguiente registro {Registro}, devuelve la etiqueta asignada.
+"""
+
+
+@register("ask_gpt5")
+def columns_gpt5(criterios, registro):
+    """Envía un prompt y devuelve la respuesta de GPT-5."""
+    time.sleep(3)
+    respuesta = client.chat.completions.create(
+        model="gpt-5",  # 👈 Aquí usas GPT-5 directamente
+        messages=[
+            {"role": "system", "content": "Eres un asistente preciso y coherente con instrucciones de análisis de texto, especificamente hablando de temas relacionados con salud ocupacional."},
+            {"role": "user", "content": clasificador.replace("{Criterios}", str(criterios['Criterios'])).replace("{Registro}", str(registro['Registro']))}
+        ]
+    )
+
+    texto_respuesta = respuesta.choices[0].message.content
+    return texto_respuesta
