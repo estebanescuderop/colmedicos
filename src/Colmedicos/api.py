@@ -2,12 +2,12 @@
 from Colmedicos.ia import ask_gpt5
 from Colmedicos.io_utils import generar_output, aplicar_data_por_tipo_desde_output, aplicar_ia_por_tipo, aplicar_plot_por_tipo_desde_output, exportar_output_a_html, mostrar_html, limpiar_output_dataframe
 from Colmedicos.registry import register
-from Colmedicos.io_utils_remaster import process_ia_blocks, process_data_blocks, process_plot_blocks, _render_vars_text, parse_plot_blocks, parse_ia_blocks, parse_data_blocks, exportar_output_a_html, _fig_to_data_uri, aplicar_columnas_gpt5, _format_result_plain, columnas_a_texto
+from Colmedicos.io_utils_remaster import process_ia_blocks, process_data_blocks, process_plot_blocks, _render_vars_text, parse_plot_blocks, parse_ia_blocks, parse_data_blocks, exportar_output_a_html, _fig_to_data_uri, aplicar_columnas_gpt5, _format_result_plain, columnas_a_texto,aplicar_multiples_columnas_gpt5
 
 # Colmedicos/api.py
 import time
 import pandas as pd
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, List, Tuple, Union, Optional, Callable
 
 #from Colmedicos.ia import ask_gpt5
 #from Colmedicos.math_ops import aplicar_plot_por_tipo_desde_output
@@ -20,7 +20,7 @@ from typing import Any, Dict, Tuple
 #)
 
 @register("informe_final")
-def informe_final(
+def informe_final_ant(
     df: pd.DataFrame,
     df_datos: pd.DataFrame,
     ctx: dict,
@@ -215,10 +215,11 @@ def informe_final(
     return html_renderizado, meta
 
 
-def informe_final_V2(
+def informe_final(
     df: pd.DataFrame,
     df_datos: pd.DataFrame,
     ctx: dict,
+    tareas: List[Dict[str, Any]] = [],
     salida_html: str = r"C:\Users\EstebanEscuderoPuert\Downloads\informe_final.html",
     escribir_archivo: bool = True,
     modo_rapido_plots: bool = True,   # intenta acelerar renders si tu process_plot_blocks lo soporta
@@ -229,6 +230,10 @@ def informe_final_V2(
       - micro-perfilado por etapa
       - opción para evitar E/S a disco
     """
+
+    # Manipulacion columnas
+    df_datos = aplicar_multiples_columnas_gpt5(df_datos, tareas)
+
     import time, re
 
     t0 = time.perf_counter()

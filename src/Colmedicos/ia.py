@@ -24,7 +24,7 @@ import plotly.express as px
 from Colmedicos.registry import register
 from Colmedicos.config import OPENAI_API_KEY
 
-API_KEY = "CLAVE"
+API_KEY = "API"
 instruccion = "Todo lo que no esté entre los signos ++, redactalo exactamente igual, lo que si esté, sigue las instrucciones y lo reemplazas por lo que haya originalmente entre ++, adicionalmente el texto literal quitale caracteres como: *, por nada del mundo modifiques el texto que encuentres entre el caracter numeral: # y saltos de línea innecesarios.\n\n"
 client = openai.OpenAI(api_key=API_KEY)
   
@@ -320,6 +320,44 @@ Salida:
   "candidates": { "xlabel": [], "y": [] }
 }
 
+Ejemplo 2:
+
+Entrada:
+# Gráfica de Tablas llamada 'Tipo de riesgo' con un conteo de registros únicos de identificación donde incluya en x las columnas de riesgo_ergonomico = si o riesgo_quimico = si o riesgo_psicosocial = si o riesgo_biomecanico = si#
+
+Salida:
+{
+      "chart_type": "tabla",
+      "function_name": "graficar_tabla",
+      "title": "Tipo de riesgo",
+      "xlabel": "tipo_riesgo",
+      "y": "documento",
+      "agg": "distinct_count",
+      "distinct_on": "documento",
+      "drop_dupes_before_sum": False,
+      "unique_by": None,
+      "conditions_all": [],
+      "conditions_any": [],
+      "binning": None,
+      "stack_columns": {
+        "columns": ["riesgo_ergonomico", "riesgo_quimico", "riesgo_psicosocial", "riesgo_biomecanico"],
+        "output_col": "tipo_riesgo",
+        "value_col": None,
+        "keep_value": "si",
+        "label_map": None
+      },
+      "color": None,
+      "colors_by_category": None,
+      "show_legend": None,
+      "show_values": None,
+      "sort": None,
+      "limit_categories": None,
+      "needs_disambiguation": False,
+      "candidates": {
+        "xlabel": [],
+        "y": []
+      }
+    }
 
 Si hubiera varias instrucciones:
 
@@ -592,12 +630,39 @@ Con base en {Criterios} y el siguiente registro {Registro}, devuelve la etiqueta
 """
 
 
-@register("ask_gpt5")
+clasificador = """Eres un clasificador determinista por reglas.
+Tu tarea es asignar exactamente UNA etiqueta entre las permitidas, usando los criterios recibidos.
+
+Instrucciones:
+1) Lee los CRITERIOS (diccionario cuyas claves son las etiquetas permitidas).
+2) Lee el REGISTRO (objeto con los campos de una fila).
+3) Aplica los criterios con lógica literal (Y/AND, O/OR, NO/NOT, comparaciones, contiene, empieza/termina, igualdad, números, fechas si vienen normalizadas).
+4) Si varios criterios coinciden, gana el que aparezca PRIMERO en el orden de las claves recibidas.
+5) Si ninguno coincide, asigna el último criterio que sea explícitamente “resto/caso por defecto”; si no existe, asigna la ÚLTIMA clave de la lista.
+6) NO EXPLIQUES. NO DES FORMATO. NO AGREGUES TEXTO EXTRA.
+7) SALIDA: devuelve ÚNICAMENTE una de las etiquetas permitidas, exactamente como aparece en las claves de CRITERIOS (sin comillas, sin espacios extra, sin saltos).
+
+Debes ser estricto y consistente. No inventes campos. Si un dato no está, trátalo como “no disponible”.
+
+Ejemplo criterios:
+{
+  "concepto1": "Se clasifica si 'diagnostico' contiene 'hipertensión' y 'edad' >= 40",
+  "concepto2": "Se clasifica si 'imc' >= 30 o 'diagnostico' contiene 'obesidad'",
+  "concepto3": "Resto de casos"
+}
+
+Respuesta etiqueta:
+concepto1
+
+Con base en {Criterios} y el siguiente registro {Registro}, devuelve la etiqueta asignada.
+"""
+
+@register("columns_gpt5")
 def columns_gpt5(criterios, registro):
     """Envía un prompt y devuelve la respuesta de GPT-5."""
-    time.sleep(3)
+    time.sleep(1)
     respuesta = client.chat.completions.create(
-        model="gpt-5",  # 👈 Aquí usas GPT-5 directamente
+        model="gpt-4.1-mini",  # 👈 Aquí usas GPT-5 directamente
         messages=[
             {"role": "system", "content": "Eres un asistente preciso y coherente con instrucciones de análisis de texto, especificamente hablando de temas relacionados con salud ocupacional."},
             {"role": "user", "content": clasificador.replace("{Criterios}", str(criterios['Criterios'])).replace("{Registro}", str(registro['Registro']))}

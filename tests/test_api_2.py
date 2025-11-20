@@ -1,36 +1,114 @@
 
-from Colmedicos.io_utils_remaster import process_ia_blocks, process_data_blocks, process_plot_blocks, _render_vars_text, parse_plot_blocks, parse_ia_blocks, parse_data_blocks, exportar_output_a_html, _fig_to_data_uri, aplicar_columnas_gpt5, _format_result_plain, columnas_a_texto, unir_idx_params_con_span_json
+from Colmedicos.io_utils_remaster import process_ia_blocks, process_data_blocks, process_plot_blocks, _render_vars_text, parse_plot_blocks, parse_ia_blocks, parse_data_blocks, exportar_output_a_html, _fig_to_data_uri, aplicar_columnas_gpt5, _format_result_plain, columnas_a_texto, unir_idx_params_con_span_json, aplicar_multiples_columnas_gpt5
 
 import pandas as pd
 from Colmedicos.ia import ask_gpt5, operaciones_gpt5, graficos_gpt5
 from Colmedicos.io_utils import aplicar_plot_por_tipo_desde_output, aplicar_ia_por_tipo, generar_output, mostrar_html
 from Colmedicos.charts import plot_from_params
 from Colmedicos.math_ops import ejecutar_operaciones_condicionales
-from Colmedicos.api import informe_final_V2
+from Colmedicos.api import informe_final
 
 
 
 # Ruta del archivo Excel
-ruta_archivo = r"C:\Users\EstebanEscuderoPuert\Downloads\Pruebas_tabla.xlsx"
+ruta_archivo = r"C:\Users\EstebanEscuderoPuert\Downloads\Ejemplo tabla.xlsx"
 # Lee el archivo Excel (por defecto lee la primera hoja)
 df = pd.read_excel(ruta_archivo)
 
 ctx = {
-    "nombre_cliente": "CORPORACIÓN EDUCATIVA MINUTO DE DIOS CEMID",
+    "nombre_cliente": "Copaltas S.A.S.",
     "nit_cliente": "901.245.435-1",
     "fecha_inicio": "2025-01-01",
     "fecha_fin": "2025-01-31",
-    "numero_personas": 120,
-    "totales": 120
+    "numero_personas": 51,
+    "totales": 500
 }
 
+
 # Ruta del archivo Excel
-ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\Informe pruebas colmedicos\Corporación unive_colmedicos.xlsx"
+ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\Informe pruebas colmedicos\Copaltas_colmedicos.xlsx"
 df_datos = pd.read_excel(ruta_archivos)
 
-inf, meta = informe_final_V2(df,df_datos,ctx,salida_html=r"C:\Users\EstebanEscuderoPuert\Downloads\Informe pruebas colmedicos\informes\informe_prueba.html")
+
+tareas = [
+
+    # 1. Clasificación osteomuscular
+    {
+        "criterios": { 
+            "No caso": "Se usa si trabajadores que no presentan síntomas ni hallazgos clínicos compatibles con desórdenes musculoesqueléticos en el momento de la evaluación",
+            "Sintomático": "Se usa si trabajadores que refieren molestias musculoesqueléticas (como dolor, rigidez o fatiga muscular), pero sin evidencia clínica o funcional suficiente para confirmar un diagnostico ocupacional.",
+            "Caso confirmado": "Se usa si trabajadores que presentan síntomas persistentes acompañados de hallazgos físicos, antecedentes y pruebas clínicas"
+        },
+        "registro_cols": "obs_osteomuscular",
+        "nueva_columna": "Clas_osteomuscular"
+    },
+
+    # 2. Riesgo cardiovascular
+    {
+        "criterios": {
+            "Riesgo Bajo": "Se usa si no hay ningún factor presente (IMC menor que 25, presion normal menor 130/80, talla normal es decir menor 88 mujeres y 102 hombres)",
+            "Riesgo Moderado": "Se usa si se existe al menos 1 factor presente (ej. solo IMC elevado o solo presion elevado o solo talla por encima de lo normal).",
+            "Riesgo Alto": "Se usa si se cumplen 2 o más factores presentes(ej, IMC elevador y presión elevada)"
+        },
+        "registro_cols": ["talla", "imc", "presion", "genero"],
+        "nueva_columna": "tipo_riesgo_cardiovascular"
+    },
+
+    # 3. Reporte de sintomatología
+    {
+        "criterios": {
+            "SI": "Se usa si los trabajadores reportan o manifiestan síntomas verbalmente durante la valoración médica ocupacional",
+            "NO": "Se usa si los trabajadores NO reportan o manifiestan síntomas verbalmente durante la valoración médica ocupacional"
+        },
+        "registro_cols": "obs_revsistemas",
+        "nueva_columna": "Reporte sintomatologia"
+    },
+
+    # 4. Antecedentes patológicos ocupacionales
+    {
+        "criterios": {
+            "No refiere antecedentes patologicos ocupacionales": "Se usa si se manifiesta explícitamente que no refiere ningún antecedente patológico ocupacional o se encuentre vacío",
+            "Si refiere antecedentes patologicos ocupacionales": "Se usa en todos los demás casos donde refiere cualquier tipo de antecedente patológico"
+        },
+        "registro_cols": "obs_antecedpatocupacional",
+        "nueva_columna": "Antecedentes Patologicos"
+    },
+
+    # 5. Práctica de deporte
+    {
+        "criterios": {
+            "No": "Se usa si no hay ningún valor",
+            "Si": "Si manifiesta por lo menos alguna periodicidad"
+        },
+        "registro_cols": "habitos_deportes1",
+        "nueva_columna": "Practica deporte regularmente"
+    },
+
+    # 6. Consumo de licor
+    {
+        "criterios": {
+            "No": "Se usa si es un exbebedor o está vacío",
+            "Si": "Se usa si manifiesta claramente que bebe en alguna periodicidad"
+        },
+        "registro_cols": "habitos_licor1",
+        "nueva_columna": "Consume licor regularmente"
+    },
+]
+
+
+inf, meta = informe_final(df,df_datos,ctx,tareas=tareas,salida_html=r"C:\Users\EstebanEscuderoPuert\Downloads\Informe pruebas colmedicos\informes\informe_prueba.html")
+
+# # Ruta del archivo Excel
+# ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\Informe pruebas colmedicos\Prueba_mult_registros.xlsx"
+# df_date = pd.read_excel(ruta_archivos)
+
+
 
 print(meta)
+
+
+#out = aplicar_multiples_columnas_gpt5(df_date, tareas)
+
 # criterios = {
 #     "No caso": "Se usa si trabajadores que no presentan síntomas ni hallazgos clínicos compatibles con desórdenes musculoesqueléticos en el momento de la evaluación",
 #     "Sintomático": "Se usa si trabajadores que refieren molestias musculoesqueléticas (como dolor, rigidez o fatiga muscular), pero sin evidencia clínica o funcional suficiente para confirmar un diagnostico ocupacional.",
@@ -60,8 +138,8 @@ with open(r"C:\Users\EstebanEscuderoPuert\Downloads\output_.txt", "w", encoding=
 variable = [{
       "chart_type": "tabla",
       "function_name": "graficar_tabla",
-      "title": "Porcentaje de habitos",
-      "xlabel": "habito",
+      "title": "Tipo de riesgo",
+      "xlabel": "tipo_riesgo",
       "y": "documento",
       "agg": "distinct_count",
       "distinct_on": "documento",
@@ -71,20 +149,16 @@ variable = [{
       "conditions_any": [],
       "binning": None,
       "stack_columns": {
-        "columns": [
-          "Practica deporte regularmente",
-          "Consume licor regularmente",
-          "Fuma cigarrillo"
-        ],
-        "output_col": "habito",
+        "columns": ["riesgo_ergonomico", "riesgo_quimico", "riesgo_psicosocial", "riesgo_biomecanico"],
+        "output_col": "tipo_riesgo",
         "value_col": None,
-        "keep_value": "Si",
+        "keep_value": "si",
         "label_map": None
       },
       "color": None,
       "colors_by_category": None,
-      "show_legend": False,
-      "show_values": False,
+      "show_legend": None,
+      "show_values": None,
       "sort": None,
       "limit_categories": None,
       "needs_disambiguation": False,
@@ -93,7 +167,6 @@ variable = [{
         "y": []
       }
     }]
-
 # fig, ax = plot_from_params(df_datos,variable[0])
 # out = _fig_to_data_uri(fig)
 # print(out)

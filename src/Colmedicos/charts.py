@@ -33,21 +33,54 @@ def _to_numeric_like(series: pd.Series) -> pd.Series:
 
 
 def _mask_from_conditions(df: pd.DataFrame, conds: list[list]) -> pd.Series:
+    """
+    Versión tolerante:
+    - Si la condición está mal formada → devuelve un mask FULL FALSE → conteo 0
+    - Si la columna no existe → mask = False
+    - Si el operador no existe → mask = False
+    - Si el valor es None o string vacío → mask = False
+    """
     if not conds:
         return pd.Series(True, index=df.index)
+
     m = pd.Series(True, index=df.index)
-    for col, op, val in conds:
+
+    for item in conds:
+        # Condiciones mal formadas → devuelven CERO
+        if not isinstance(item, (list, tuple)) or len(item) != 3:
+            return pd.Series(False, index=df.index)
+
+        col, op, val = item
+
+        # Columnas inexistentes → CERO
         if col not in df.columns:
-            raise ValueError(f"Columna en condición no existe: {col}")
+            return pd.Series(False, index=df.index)
+
+        # Operador inválido → CERO
         if op not in _OPS:
-            raise ValueError(f"Operador no soportado: {op}")
+            return pd.Series(False, index=df.index)
+
         s = df[col]
+
+        # Valor vacío o None → CERO
+        if val is None or (isinstance(val, str) and val.strip() == ""):
+            return pd.Series(False, index=df.index)
+
+        # Convertir valor según tipo
         if is_numeric_dtype(s):
             val = pd.to_numeric(val, errors="coerce")
         elif is_datetime64_any_dtype(s):
             val = pd.to_datetime(val, errors="coerce")
+
+        # Si conversión falla → CERO
+        if val is None or (isinstance(val, float) and np.isnan(val)):
+            return pd.Series(False, index=df.index)
+
+        # Aplicar condición
         m &= _OPS[op](s, val)
+
     return m
+
 
 def _mask_from_condition_blocks(
     df: pd.DataFrame,
@@ -805,6 +838,127 @@ def graficar_tabla(
     ax.set_title(titulo, fontsize=13, fontweight="bold", pad=20)
     fig.tight_layout()
     return fig, ax
+# import pandas as pd
+# from pandas.api.types import is_numeric_dtype, is_datetime64_any_dtype
+# from typing import Optional, List, Any, Union, Tuple
+# import matplotlib.pyplot as plt
+# from PIL import Image, ImageDraw, ImageFont
+# from io import BytesIO
+# from PIL import Image, ImageDraw, ImageFont
+# from typing import Optional, Union, List, Any, Dict, Tuple
+# import pandas as pd
+# import matplotlib.pyplot as plt
+# from pandas.api.types import is_numeric_dtype
+
+# def graficar_tabla(
+#     df: pd.DataFrame,
+#     xlabel: Optional[Union[str, List[str]]] = None,
+#     y: Optional[Union[str, List[str]]] = None,
+#     agg: Union[str, Dict[str, str]] = "sum",
+#     titulo: str = "Tabla de Datos",
+#     color: str = "#25347a",
+#     *,
+#     unique_by: Optional[Union[str, List[str]]] = None,
+#     conditions_all: Optional[List[List[Any]]] = None,
+#     conditions_any: Optional[List[Union[List[Any], List[List[Any]]]]] = None,
+#     distinct_on: Optional[str] = None,
+#     drop_dupes_before_sum: bool = False,
+#     where: Optional[pd.Series] = None,
+# ) -> Tuple[plt.Figure, plt.Axes]:
+#     """
+#     Tabla renderizada como imagen, compatible con _fig_to_data_uri.
+#     Mantiene compatibilidad con firma original para plot_from_params.
+#     """
+
+#     # Helper compatible con Pillow >=10
+#     def get_text_size(font, text):
+#         if hasattr(font, "getbbox"):
+#             bbox = font.getbbox(text)
+#             return bbox[2] - bbox[0], bbox[3] - bbox[1]
+#         else:
+#             return font.getsize(text)
+
+#     # Validaciones y preprocesamiento
+#     df2, xlabel_final, _ = _ensure_xlabel(df, xlabel)
+
+#     # Determinar y
+#     if y is None:
+#         y_cols = df2.select_dtypes(include=[np.number]).columns.tolist()
+#     elif isinstance(y, str):
+#         y_cols = [y]
+#     else:
+#         y_cols = y
+
+#     # Filtros (igual que en la función original)
+#     dff = _prefilter_df(df2, unique_by=unique_by, conditions_all=conditions_all, conditions_any=conditions_any)
+
+#     # Agregar
+#     df_plot = _aggregate_frame(
+#         dff,
+#         xlabel=xlabel_final,
+#         y_cols=y_cols,
+#         agg=agg,
+#         distinct_on=distinct_on,
+#         drop_dupes_before_sum=drop_dupes_before_sum,
+#         where=where
+#     )
+#     df_plot = df_plot.reset_index() if xlabel_final is not None else df_plot.reset_index(drop=True)
+
+#     # Formateo
+#     for col in df_plot.columns:
+#         if is_numeric_dtype(df_plot[col]):
+#             df_plot[col] = df_plot[col].round(2)
+#     df_plot = df_plot.fillna("").astype(str)
+
+#     # Renderizar tabla en imagen
+#     cell_padding = 10
+#     font = ImageFont.load_default()
+
+#     # Calcular tamaños de columnas
+#     col_widths = []
+#     for col in df_plot.columns:
+#         max_width = max(
+#             get_text_size(font, str(col))[0],
+#             *(get_text_size(font, str(v))[0] for v in df_plot[col])
+#         )
+#         col_widths.append(max_width + 2 * cell_padding)
+
+#     # Altura de filas
+#     row_height = get_text_size(font, "Ay")[1] + 2 * cell_padding
+
+#     # Dimensiones finales de tabla
+#     table_width = sum(col_widths)
+#     table_height = row_height * (len(df_plot) + 1)  # +1 header row
+
+#     # Crear imagen
+#     img = Image.new("RGB", (table_width, table_height), "white")
+#     draw = ImageDraw.Draw(img)
+
+#     # Pintar encabezado
+#     x_offset = 0
+#     for i, col in enumerate(df_plot.columns):
+#         draw.rectangle([x_offset, 0, x_offset + col_widths[i], row_height], fill=color)
+#         draw.text((x_offset + cell_padding, cell_padding), str(col), font=font, fill="white")
+#         x_offset += col_widths[i]
+
+#     # Pintar filas
+#     for row_num, (_, row) in enumerate(df_plot.iterrows(), start=1):
+#         x_offset = 0
+#         for i, val in enumerate(row):
+#             fill_color = "#f9f9f9" if row_num % 2 else "white"
+#             draw.rectangle([x_offset, row_num * row_height, x_offset + col_widths[i], (row_num + 1) * row_height], fill=fill_color)
+#             draw.text((x_offset + cell_padding, row_num * row_height + cell_padding), str(val), font=font, fill="black")
+#             x_offset += col_widths[i]
+
+#     # Convertir imagen en figura matplotlib
+#     fig, ax = plt.subplots(figsize=(table_width / 100, table_height / 100), dpi=100)
+#     ax.axis("off")
+#     ax.imshow(img)
+
+#     return fig, ax
+
+
+
 
 # ===========================
 # Router desde params
@@ -989,7 +1143,6 @@ def _finalize_layout(fig, ax, *, legend_outside=True):
     plt.tight_layout()
 
 
-
 @register("plt_from_params")
 def plot_from_params(df, params, *, show: bool=False):
     import copy
@@ -1047,17 +1200,63 @@ def plot_from_params(df, params, *, show: bool=False):
     pie_max_chars = int(p.get("pie_max_chars", 60))
     pie_wrap_w    = int(p.get("pie_wrap_width", 25))
 
-    # --- Extra: parámetros faltantes (el error original) ---
+    # --- Limpieza de condiciones ---
+    def _clean_conditions(cond):
+        if not cond:
+            return []
+        cleaned = []
+        for c in cond:
+            if not c:
+                continue
+            if not isinstance(c, (list, tuple)):
+                continue
+            if len(c) != 3:
+                continue
+            col, op, val = c
+            if col is None or col == "" or str(col).strip() == "":
+                continue
+            cleaned.append([col, op, val])
+        return cleaned
+
+    # --- Extra: parámetros faltantes ---
     unique_by             = p.get("unique_by")
-    conditions_all        = p.get("conditions_all")
-    conditions_any        = p.get("conditions_any")
+    conditions_all        = _clean_conditions(p.get("conditions_all"))
+    conditions_any        = _clean_conditions(p.get("conditions_any"))
     distinct_on           = p.get("distinct_on")
     drop_dupes_before_sum = p.get("drop_dupes_before_sum", False)
 
-    # ================================
-    # 🔥 Sección donde realmente se arregla todo:
-    # Se arma un solo bloque de kwargs para TODAS las funciones
-    # ================================
+    # --- BINNING ---
+    binning = p.get("binning")
+    if binning:
+        df, bucket_col = _apply_binning(df, binning)
+        xlabel = bucket_col
+
+    # --- PRE-FILTRADO ANTES DEL STACK ---
+    df_filtered = _prefilter_df(
+        df,
+        unique_by=unique_by,
+        conditions_all=conditions_all,
+        conditions_any=conditions_any,
+    )
+
+    # --- STACK ---
+    stack = p.get("stack_columns")
+    if stack:
+        cols      = stack["columns"]
+        out_col   = stack.get("output_col", "tipo_riesgo")
+        val_col   = stack.get("value_col", "valor")
+        label_map = stack.get("label_map")
+        keep_val  = stack.get("keep_value")
+
+        df_filtered = _stack_columns(df_filtered, cols, output_col=out_col, value_col=val_col, label_map=label_map)
+
+        if keep_val not in (None, "any", "", []):
+            df_filtered = df_filtered[df_filtered[val_col] == keep_val]
+
+        xlabel = out_col
+
+ 
+    # --- Preparar kwargs comunes ---
     common_kwargs = dict(
         xlabel=xlabel,
         y=y,
@@ -1071,49 +1270,25 @@ def plot_from_params(df, params, *, show: bool=False):
         drop_dupes_before_sum=drop_dupes_before_sum,
     )
 
-    # --- BINNING ---
-    binning = p.get("binning")
-    if binning:
-        df, bucket_col = _apply_binning(df, binning)
-        xlabel = bucket_col
-        common_kwargs["xlabel"] = bucket_col
-
-    # --- STACK ---
-    stack = p.get("stack_columns")
-    if stack:
-        cols      = stack["columns"]
-        out_col   = stack.get("output_col", "tipo_riesgo")
-        val_col   = stack.get("value_col", "valor")
-        label_map = stack.get("label_map")
-        keep_val  = stack.get("keep_value")
-
-        df = _stack_columns(df, cols, output_col=out_col, value_col=val_col, label_map=label_map)
-
-        if keep_val not in (None, "any", "", []):
-            df = df[df[val_col] == keep_val]
-
-        xlabel = out_col
-        common_kwargs["xlabel"] = out_col
-
     # --- Normalización mínima de torta ---
     if fn_key in ("graficar_torta", "torta", "pie") and isinstance(y, list):
         y = y[0] if y else None
         common_kwargs["y"] = y
 
-    # ================================
-    # 🔥 Aquí, con un solo llamado, POR FIN llegan los filtros a las funciones 🔥
-    # ================================
-    fig, ax = func(df, **common_kwargs)
+    # === Llamado central a la función sin repetir filtros internos ===
+    safe_kwargs = common_kwargs.copy()
+    safe_kwargs["conditions_all"] = None
+    safe_kwargs["conditions_any"] = None
+    safe_kwargs["unique_by"] = None
 
-    # ---------------------------------------
-    # Post-formateo según tipo
-    # ---------------------------------------
+    fig, ax = func(df_filtered, **safe_kwargs)
+
+
+    # --- Post-formateo según el tipo ---
     t = (tipo or "").lower()
 
-    # --- Fallback automático si no viene "tipo"
     if not t:
         ct = (p.get("chart_type") or "").lower()
-
         if ct in ("barras", "bar", "column", "col"):
             t = "barras"
         elif ct in ("horizontal", "barh", "barras_horizontal", "graficar_barras_horizontal"):
@@ -1123,33 +1298,18 @@ def plot_from_params(df, params, *, show: bool=False):
         elif ct in ("tabla", "table", "graficar_tabla"):
             t = "tabla"
 
-    # Barras verticales
     if t in ("barras", "bar", "column", "col"):
-        _wrap_shorten_ticks(
-            ax, axis="x",
-            wrap_width=wrap_width_x,
-            max_chars=max_chars_x,
-            fontsize=tick_fontsize,
-            rotation=rotation
-        )
+        _wrap_shorten_ticks(ax, axis="x", wrap_width=wrap_width_x, max_chars=max_chars_x, fontsize=tick_fontsize, rotation=rotation)
 
-    # Barras horizontales
     elif t in ("barh", "barras_h", "horizontal", "barra_horizontal"):
-        _wrap_shorten_ticks(
-            ax, axis="y",
-            wrap_width=wrap_width_y,
-            max_chars=max_chars_y,
-            fontsize=tick_fontsize
-        )
+        _wrap_shorten_ticks(ax, axis="y", wrap_width=wrap_width_y, max_chars=max_chars_y, fontsize=tick_fontsize)
 
-    # Tortas
     elif t in ("torta", "pie", "pastel"):
         labels_raw = None
-        if xlabel and xlabel in df.columns:
-            labels_raw = df[xlabel].astype(str).tolist()
+        if xlabel and xlabel in df_filtered.columns:
+            labels_raw = df_filtered[xlabel].astype(str).tolist()
         else:
             labels_raw = [txt.get_text() for txt in ax.texts if "%" not in txt.get_text()]
-
         labels_fmt = _format_pie_labels(labels_raw, max_chars=pie_max_chars, wrap_width=pie_wrap_w)
         _apply_pie_texts(ax, labels_fmt)
 
@@ -1160,6 +1320,7 @@ def plot_from_params(df, params, *, show: bool=False):
         plt.show()
 
     return fig, ax
+
 
 # @register("plt_from_params")
 # def plot_from_params(df, params, *, show: bool=False):
