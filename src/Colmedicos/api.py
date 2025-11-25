@@ -1,8 +1,8 @@
 
-from Colmedicos.ia import ask_gpt5
+from Colmedicos.ia import ask_gpt5, portada_gpt5
 from Colmedicos.io_utils import generar_output, aplicar_data_por_tipo_desde_output, aplicar_ia_por_tipo, aplicar_plot_por_tipo_desde_output, exportar_output_a_html, mostrar_html, limpiar_output_dataframe
 from Colmedicos.registry import register
-from Colmedicos.io_utils_remaster import process_ia_blocks, process_data_blocks, process_plot_blocks, _render_vars_text, parse_plot_blocks, parse_ia_blocks, parse_data_blocks, exportar_output_a_html, _fig_to_data_uri, aplicar_columnas_gpt5, _format_result_plain, columnas_a_texto,aplicar_multiples_columnas_gpt5
+from Colmedicos.io_utils_remaster import process_ia_blocks, process_data_blocks, process_plot_blocks, _render_vars_text, parse_plot_blocks, parse_ia_blocks, parse_data_blocks, exportar_output_a_html, _fig_to_data_uri, _format_result_plain, columnas_a_texto,aplicar_multiples_columnas_gpt5, limpieza_final
 
 # Colmedicos/api.py
 import time
@@ -222,7 +222,8 @@ def informe_final(
     tareas: List[Dict[str, Any]] = [],
     salida_html: str = r"C:\Users\EstebanEscuderoPuert\Downloads\informe_final.html",
     escribir_archivo: bool = True,
-    modo_rapido_plots: bool = True,   # intenta acelerar renders si tu process_plot_blocks lo soporta
+    modo_rapido_plots: bool = True,
+    generar_portada: bool = True,
 ) -> Tuple[str, Dict[str, Any]]:
     """
     Versión optimizada con:
@@ -282,8 +283,24 @@ def informe_final(
             text_for_next = out_ia
         else:
             logs.append("Análisis IA: SKIP (sin tokens)")
+            text_for_next = out_ia
             # text_for_next se mantiene
+                # 3.5) Portada y tabla de contenido opcional
 
+        
+        if generar_portada:
+            t35 = time.perf_counter()
+            try:
+                portada = portada_gpt5(text_for_next)
+                text_con_portada = portada + "\n\n" + text_for_next
+                logs.append("Generación de portada y TOC: OK")
+                meta_detalle["t_portada"] = round(time.perf_counter() - t35, 4)
+                text_for_next = text_con_portada
+            except Exception as e_port:
+                logs.append(f"Generación de portada y TOC: ERROR → {e_port}")
+                meta_detalle["t_portada"] = round(time.perf_counter() - t35, 4)
+
+        
         # 4) Plot blocks (solo si hay #GRAFICA#)
         if hay_plot:
             t4 = time.perf_counter()
@@ -303,6 +320,9 @@ def informe_final(
         else:
             logs.append("Procesamiento de gráficas: SKIP (sin tokens)")
 
+
+        text_for_next = limpieza_final(text_for_next)
+        
         # 5) Exportar HTML (evitar E/S si no se requiere)
         t5 = time.perf_counter()
         if escribir_archivo:

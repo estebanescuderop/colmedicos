@@ -1,8 +1,8 @@
 
-from Colmedicos.io_utils_remaster import process_ia_blocks, process_data_blocks, process_plot_blocks, _render_vars_text, parse_plot_blocks, parse_ia_blocks, parse_data_blocks, exportar_output_a_html, _fig_to_data_uri, aplicar_columnas_gpt5, _format_result_plain, columnas_a_texto, unir_idx_params_con_span_json, aplicar_multiples_columnas_gpt5
+from Colmedicos.io_utils_remaster import process_ia_blocks, process_data_blocks, process_plot_blocks, _render_vars_text, parse_plot_blocks, parse_ia_blocks, parse_data_blocks, exportar_output_a_html, _fig_to_data_uri, _format_result_plain, columnas_a_texto, unir_idx_params_con_span_json, aplicar_multiples_columnas_gpt5
 
 import pandas as pd
-from Colmedicos.ia import ask_gpt5, operaciones_gpt5, graficos_gpt5
+from Colmedicos.ia import ask_gpt5, operaciones_gpt5, graficos_gpt5,portada_gpt5
 from Colmedicos.io_utils import aplicar_plot_por_tipo_desde_output, aplicar_ia_por_tipo, generar_output, mostrar_html
 from Colmedicos.charts import plot_from_params
 from Colmedicos.math_ops import ejecutar_operaciones_condicionales
@@ -95,14 +95,11 @@ tareas = [
     },
 ]
 
-
 inf, meta = informe_final(df,df_datos,ctx,tareas=tareas,salida_html=r"C:\Users\EstebanEscuderoPuert\Downloads\Informe pruebas colmedicos\informes\informe_prueba.html")
 
 # # Ruta del archivo Excel
 # ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\Informe pruebas colmedicos\Prueba_mult_registros.xlsx"
 # df_date = pd.read_excel(ruta_archivos)
-
-
 
 print(meta)
 
@@ -127,13 +124,17 @@ print(meta)
 
 
 texto_completo = columnas_a_texto(df,"Titulo","Contenido")
-with open(r"C:\Users\EstebanEscuderoPuert\Downloads\output_.txt", "w", encoding="utf-8") as f:
-    f.write(texto_completo)
 
 
-#out = graficos_gpt5(df_datos,texto_completo)
+
+#out = portada_gpt5(texto_completo)
+#out = texto_completo + "\n\n" + out
 #out = operaciones_gpt5(df_datos,texto_completo)
 #print(out)
+
+
+with open(r"C:\Users\EstebanEscuderoPuert\Downloads\output_.txt", "w", encoding="utf-8") as f:
+    f.write(texto_completo)
 
 variable = [{
       "chart_type": "tabla",

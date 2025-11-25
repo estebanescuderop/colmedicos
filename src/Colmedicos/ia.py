@@ -26,6 +26,32 @@ from Colmedicos.config import OPENAI_API_KEY
 
 API_KEY = "API"
 instruccion = "Todo lo que no esté entre los signos ++, redactalo exactamente igual, lo que si esté, sigue las instrucciones y lo reemplazas por lo que haya originalmente entre ++, adicionalmente el texto literal quitale caracteres como: *, por nada del mundo modifiques el texto que encuentres entre el caracter numeral: # y saltos de línea innecesarios.\n\n"
+rol = """Eres un médico especialista en Salud Ocupacional en Colombia.
+Generas informes claros, técnicos y coherentes para empresas de todos los sectores económicos.
+Tu informe no se limita a describir datos: interpreta, contextualiza, correlaciona y recomienda, siempre con enfoque preventivo.
+1. Reglas estrictas de redacción y normativa
+✔ Cumplimiento normativo
+•	Alinea todo el lenguaje a la Resolución 1843 de 2025 y normativa nacional.
+•	No uses el término “No Apto”.
+•	No emitas conceptos impositivos ni restrictivos.
+•	No des órdenes médicas absolutas.
+✔ Tono permitido
+•	Usa expresiones como:
+o	“Se sugiere…”
+o	“Podría considerarse…”
+o	“Desde el punto de vista ocupacional…”
+o	“Se recomienda fortalecer…”
+•	Evita:
+o	“Está prohibido…”
+o	“No puede realizar…”
+o	“Debe reubicarse…”
+✔ Estilo
+•	Técnico, claro y profesional.
+•	Párrafos cortos.
+•	Conexión lógica entre secciones.
+•	Lenguaje uniforme entre informes.
+•	Evita jergas y coloquialismos.
+"""
 client = openai.OpenAI(api_key=API_KEY)
   
 @register("ask_gpt5")
@@ -35,7 +61,7 @@ def ask_gpt5(pregunta):
     respuesta = client.chat.completions.create(
         model="gpt-5",  # 👈 Aquí usas GPT-5 directamente
         messages=[
-            {"role": "system", "content": "Eres un asistente preciso y coherente con instrucciones de edición de texto, especificamente hablando de temas relacionados con salud ocupacional."},
+            {"role": "system", "content": rol},
             {"role": "user", "content": instruccion + pregunta}
         ]
     )
@@ -600,36 +626,6 @@ def operaciones_gpt5(df, pregunta):
     return params
 
 
-
-
-clasificador = """Eres un clasificador determinista por reglas.
-Tu tarea es asignar exactamente UNA etiqueta entre las permitidas, usando los criterios recibidos.
-
-Instrucciones:
-1) Lee los CRITERIOS (diccionario cuyas claves son las etiquetas permitidas).
-2) Lee el REGISTRO (objeto con los campos de una fila).
-3) Aplica los criterios con lógica literal (Y/AND, O/OR, NO/NOT, comparaciones, contiene, empieza/termina, igualdad, números, fechas si vienen normalizadas).
-4) Si varios criterios coinciden, gana el que aparezca PRIMERO en el orden de las claves recibidas.
-5) Si ninguno coincide, asigna el último criterio que sea explícitamente “resto/caso por defecto”; si no existe, asigna la ÚLTIMA clave de la lista.
-6) NO EXPLIQUES. NO DES FORMATO. NO AGREGUES TEXTO EXTRA.
-7) SALIDA: devuelve ÚNICAMENTE una de las etiquetas permitidas, exactamente como aparece en las claves de CRITERIOS (sin comillas, sin espacios extra, sin saltos).
-
-Debes ser estricto y consistente. No inventes campos. Si un dato no está, trátalo como “no disponible”.
-
-Ejemplo criterios:
-{
-  "concepto1": "Se clasifica si 'diagnostico' contiene 'hipertensión' y 'edad' >= 40",
-  "concepto2": "Se clasifica si 'imc' >= 30 o 'diagnostico' contiene 'obesidad'",
-  "concepto3": "Resto de casos"
-}
-
-Respuesta etiqueta:
-concepto1
-
-Con base en {Criterios} y el siguiente registro {Registro}, devuelve la etiqueta asignada.
-"""
-
-
 clasificador = """Eres un clasificador determinista por reglas.
 Tu tarea es asignar exactamente UNA etiqueta entre las permitidas, usando los criterios recibidos.
 
@@ -666,6 +662,190 @@ def columns_gpt5(criterios, registro):
         messages=[
             {"role": "system", "content": "Eres un asistente preciso y coherente con instrucciones de análisis de texto, especificamente hablando de temas relacionados con salud ocupacional."},
             {"role": "user", "content": clasificador.replace("{Criterios}", str(criterios['Criterios'])).replace("{Registro}", str(registro['Registro']))}
+        ]
+    )
+
+    texto_respuesta = respuesta.choices[0].message.content
+    return texto_respuesta
+
+
+
+AG_P = """Eres un agente experto en documentación de salud ocupacional.
+Tu tarea es, a partir de una sola cadena de texto que recibirás como entrada, construir una portada y una tabla de contenido en texto plano, siguiendo estrictamente estas reglas:
+
+NO DEBES ANALIZAR CONTENIDO DEL TEXTO INTERNO.
+NO DEBES GENERAR UNA SEGUNDA PORTADA.
+NO DEBES REPETIR NINGUNA SECCIÓN.
+Instrucciones:
+1. Genera SOLO UNA portada
+2. Luego genera SOLO UNA tabla de contenido
+3. Nunca repitas la portada
+4. Nunca repitas la tabla de contenido
+5. NO GENERES TEXTO DEL DOCUMENTO
+6. NO RESUMAS EL DOCUMENTO
+7. NO AGREGUES ANÁLISIS MÉDICO
+8. NO DUPLIQUES NADA
+
+
+1. Formato de SALIDA (siempre texto plano, sin JSON)
+
+Debes devolver SIEMPRE, en este orden:
+
+Portada, usando saltos de línea y estilo similar al siguiente ejemplo:
+
+DIAGNOSTICO DE CONDICIONES DE SALUD POBLACIÓN TRABAJADORA*
+
+EVALUACIONES MEDICAS OCUPACIONALES PERIODICAS PROGRAMADAS
+
+EMPRESA:
+
+[Nombre de la empresa]
+
+RESULTADOS DE EVALUACIONES:
+
+[Desde el dd/mm/aaaa hasta dd/mm/aaaa]
+
+[Nombre de la institución responsable del informe]
+[Ciudades donde opera / cobertura]
+[URL o nota informativa]
+
+(Respeta los asteriscos para resaltar en cursiva como en el ejemplo.)
+
+Luego, varios saltos de línea y el título:
+
+*TABLA DE CONTENIDO *
+
+y a continuación la tabla de contenido en el siguiente estilo:
+
+1 Introducción
+2 Marco legal
+3 Objetivos
+3.1 Objetivo general
+3.2 Objetivos específicos
+4 Características de la empresa
+
+Sigue este patrón de numeración:
+
+Títulos de nivel 1 → 1, 2, 3, 4, etc.
+
+Subtítulos de nivel 2 → 3.1, 3.2, 10.1, 10.2, etc.
+
+Subtítulos de nivel 3 → 11.2.1, 11.2.2, etc.
+
+Usa una tabulación o varios espacios entre el número y el título.
+Los títulos deben ir entre *…* tal como en el ejemplo.
+
+2. Cómo detectar la información para la portada
+
+A partir del texto de entrada:
+
+Título principal del informe:
+
+Si hay un encabezado en mayúsculas globales o similar a “DIAGNÓSTICO…”, úsalo.
+
+Si no, construye un título genérico:
+DIAGNOSTICO DE CONDICIONES DE SALUD POBLACIÓN TRABAJADORA*
+
+Nombre de la empresa:
+
+Busca patrones como empresa, EMPRESA:, {{nombre_cliente}} o similares.
+
+Si encuentras un nombre claro, úsalo dentro de [ ... ] en la sección EMPRESA.
+
+Si no lo encuentras, escribe [Nombre de la empresa].
+
+Rango de fechas de resultados:
+
+Busca expresiones tipo {{fecha_inicio}}, {{fecha_fin}} o fechas explícitas.
+
+Si las encuentras, construye el texto:
+[Desde el dd/mm/aaaa hasta dd/mm/aaaa]
+usando el formato más parecido posible a las fechas detectadas.
+
+Si no hay fechas claras, escribe [Rango de fechas de las evaluaciones].
+
+Institución responsable:
+
+Si detectas un nombre como “Laboratorio Clínico Colmedicos I.P.S S.A.S” o similar, úsalo.
+
+Si no, escribe:
+*[Nombre de la institución responsable del informe]*
+
+Ciudades / cobertura y URL:
+
+Si aparecen en el texto, reutilízalas.
+
+Si no, puedes dejar una línea genérica como:
+*[Cobertura geográfica]*
+www.ejemplo.com
+
+3. Cómo construir la tabla de contenido
+
+A partir del texto de entrada:
+
+Detecta títulos y subtítulos:
+
+Líneas numeradas tipo 1., 2., 3.1, 11.2.3, etc.
+
+Líneas con formato de encabezado claramente identificable (por ejemplo, rodeadas de *…* y con numeración previa).
+
+Respeta el orden en que aparecen en el texto.
+
+Asigna nivel jerárquico:
+
+Si la línea inicia con un solo número (ej. 8.) → Nivel 1 → 8.
+
+Si tiene formato X.Y (ej. 8.1) → Nivel 2 → 8.1.
+
+Si tiene formato X.Y.Z (ej. 11.2.3) → Nivel 3 → 11.2.3.
+
+Texto del título:
+
+Usa el texto del encabezado sin los números ni puntos finales.
+
+Ponlo entre *…*.
+
+Ejemplo: 8.1 PIRAMIDE POBLACIONAL → 8.1 *Pirámide poblacional*.
+
+Gráficos y tablas:
+
+Si detectas secciones específicas para pruebas o gráficos (ej.: 11.3.1 Visiometría, 11.3.2 Optometría), inclúyelas tal cual en la tabla de contenido, respetando su numeración.
+
+Si hay referencias entre corchetes [Visiometría], [Optometría], etc., puedes conservarlas.
+
+No inventes secciones:
+
+Solo construye la tabla de contenido con base en títulos, subtítulos y numeraciones que realmente estén en el texto.
+
+Si algo no existe en el texto, no lo añadas.
+
+4. Estilo general
+
+Usa redacción neutra, formal y clara.
+
+No expliques lo que estás haciendo.
+
+La salida debe ser solo la portada y la tabla de contenido, sin comentarios adicionales.
+
+No devuelvas JSON, ni listas, ni marcas de código.
+
+Instrucción final: Con base al {texto} devuelve la portada y la tabla de contenido siguiendo las reglas anteriores.
+"""
+
+rol1 = """Eres un agente experto en documentación de salud ocupacional.
+Tu tarea es, a partir de una sola cadena de texto que recibirás como entrada, construir una portada y una tabla de contenido en texto plano."""
+
+  
+@register("portada_gpt5")
+def portada_gpt5(texto):
+    """Envía un prompt y devuelve la respuesta de GPT-5."""
+    subprompt = AG_P.replace("{texto}", texto)
+    time.sleep(3)
+    respuesta = client.chat.completions.create(
+        model="gpt-5",  # 👈 Aquí usas GPT-5 directamente
+        messages=[
+            {"role": "system", "content": rol1},
+            {"role": "user", "content": subprompt}
         ]
     )
 

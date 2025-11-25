@@ -1104,3 +1104,26 @@ def columnas_a_texto(df: pd.DataFrame, col1: str, col2: str, *,
             piezas.append(s)
     
     return sep.join(piezas)
+
+
+
+
+
+
+
+import re
+
+def limpieza_final(texto: str) -> str:
+    # eliminar todo lo que esté entre #...#
+    texto = re.sub(r"#.*?#", "", texto, flags=re.DOTALL)
+    
+    # eliminar signos [ ] *
+    texto = texto.replace("[", "").replace("]", "").replace("*", "")
+    
+    # limpiar dobles espacios
+    #texto = re.sub(r" {2,}", " ", texto)
+    
+    # limpiar espacios antes de saltos
+    #texto = re.sub(r" +\n", "\n", texto)
+
+    return texto.strip()
