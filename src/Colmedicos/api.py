@@ -231,9 +231,8 @@ def informe_final(
     aplicar_split: bool = False,
     # parámetros de cada transformación
     col_texto_cie10: str = None,
-    df_union: pd.DataFrame = None,
     col_df1: str = None,
-    col_df2: str = None,
+    col_df2: str = "Code",
     columnas_unpivot: list = None,
     col_split: str = None,
     sep_split: str = None,
@@ -254,6 +253,10 @@ def informe_final(
     df_out = aplicar_multiples_columnas_gpt5(df_out, tareas)
     print("Columnas creadas con éxito")
     # 1) PROCESAR CIE10 ----------------------------------
+    import json
+    with open("src\Colmedicos\cie10.json", "r", encoding="utf-8") as f:
+        maestro_cie10 = json.load(f)
+    df_union = maestro_cie10
     if aplicar_cie10:
         if not col_texto_cie10:
             raise ValueError("Debe especificar col_texto_cie10 cuando aplicar_cie10=True")
