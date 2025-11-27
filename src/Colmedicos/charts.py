@@ -394,29 +394,51 @@ def graficar_barras(
         df_plot = df_plot.head(limit_categories)
 
     # --------------------------------------------
-    # Construir figura
+    # Construir figura con estilo profesional
     # --------------------------------------------
-    fig, ax = plt.subplots(figsize=(10, 6))
+    fig, ax = plt.subplots(figsize=(12, 7), facecolor='white')
+    ax.set_facecolor('#f8f9fa')
 
     colname = df_plot.columns[0]
-    ax.bar(df_plot.index.astype(str), df_plot[colname], color=color)
 
-    ax.set_title(titulo)
-    ax.set_ylabel(colname)
-    ax.set_xlabel(xlabel_final)
-    ax.grid(axis="y", linestyle="--", alpha=0.6)
+    # Paleta de colores profesional si no se especifica
+    if color is None:
+        color = '#5A6C7D'  # Azul grisáceo corporativo
 
-    # Rotar etiquetas largas
-    ax.tick_params(axis="x", rotation=35)
+    bars = ax.bar(df_plot.index.astype(str), df_plot[colname],
+                  color=color, edgecolor='white', linewidth=1.2, alpha=0.9)
 
-    # Valores sobre las barras
+    # Agregar sombra sutil a las barras
+    for bar in bars:
+        bar.set_zorder(3)
+
+    # Título con mejor formato
+    ax.set_title(titulo, fontsize=16, fontweight='bold', pad=20, color="#000000")
+    ax.set_ylabel(colname, fontsize=11, fontweight='600', color='#34495e')
+    ax.set_xlabel(xlabel_final if xlabel_final else '', fontsize=11, fontweight='600', color='#34495e')
+
+    # Grid mejorado
+    ax.grid(axis="y", linestyle="--", alpha=0.3, color='#bdc3c7', zorder=0)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_color('#bdc3c7')
+    ax.spines['bottom'].set_color('#bdc3c7')
+
+    # Rotar etiquetas con mejor ángulo
+    ax.tick_params(axis="x", rotation=45, labelsize=9, colors='#34495e')
+    ax.tick_params(axis="y", labelsize=9, colors='#34495e')
+
+    # Valores sobre las barras con formato mejorado
     if show_values:
         for i, v in enumerate(df_plot[colname]):
-            ax.text(i, v, f"{v}", ha="center", va="bottom")
+            formatted_val = f"{v:,.0f}" if v >= 1 else f"{v:.2f}"
+            ax.text(i, v, formatted_val, ha="center", va="bottom",
+                   fontsize=9, fontweight='600', color='#2c3e50')
 
-    # Leyenda opcional
+    # Leyenda opcional con mejor estilo
     if show_legend:
-        ax.legend([colname])
+        ax.legend([colname], loc='upper right', framealpha=0.95,
+                 edgecolor='#bdc3c7', fontsize=10)
     else:
         leg = ax.get_legend()
         if leg:
@@ -424,6 +446,127 @@ def graficar_barras(
 
     fig.tight_layout()
     return fig, ax
+
+# import plotly.express as px
+# import plotly.graph_objects as go
+
+# def graficar_barras(
+#     df: pd.DataFrame,
+#     xlabel: Optional[Union[str, List[str]]] = None,
+#     y: Optional[Union[str, List[str]]] = None,
+#     agg: Union[str, Dict[str, str]] = "sum",
+#     titulo: str = "Gráfica de Barras",
+#     color: Optional[Union[str, List[str]]] = None,
+#     *,
+#     # Compatibilidad completa con plot_from_params
+#     unique_by: Optional[Union[str, List[str]]] = None,
+#     conditions_all: Optional[List[List[Any]]] = None,
+#     conditions_any: Optional[List[Union[List[Any], List[List[Any]]]]] = None,
+#     distinct_on: Optional[str] = None,
+#     drop_dupes_before_sum: bool = False,
+#     sort: Optional[Dict[str, str]] = None,
+#     limit_categories: Optional[int] = None,
+#     show_legend: bool = True,
+#     show_values: bool = False,
+#     **kwargs,   # absorbe cualquier otro parámetro enviado
+# ) -> Tuple[plt.Figure, plt.Axes]:
+
+#     # --------------------------------------------
+#     # Validación base
+#     # --------------------------------------------
+#     if not isinstance(df, pd.DataFrame):
+#         raise TypeError("El parámetro 'df' debe ser un DataFrame de pandas.")
+
+#     # Unificar X (acepta lista -> crea multiindex si aplica)
+#     df2, xlabel_final, _ = _ensure_xlabel(df, xlabel)
+
+#     # --------------------------------------------
+#     # Determinar Y
+#     # --------------------------------------------
+#     if y is None:
+#         num_cols = df2.select_dtypes(include=[np.number]).columns.tolist()
+#         if not num_cols and not (distinct_on and agg in ("count", "distinct_count")):
+#             raise ValueError("No se encontraron columnas numéricas ni 'distinct_on'.")
+#         y_cols = [num_cols[0]] if num_cols else []
+#     else:
+#         if y not in df2.columns:
+#             raise ValueError(f"La columna '{y}' no existe en el DataFrame.")
+#         y_cols = [y]
+
+#     # --------------------------------------------
+#     # Aplicar filtro + deduplicación previa
+#     # --------------------------------------------
+#     dff = _prefilter_df(
+#         df2,
+#         unique_by=unique_by,
+#         conditions_all=conditions_all,
+#         conditions_any=conditions_any,
+#     )
+
+#     # --------------------------------------------
+#     # Agregar (usa tu agregador unificado)
+#     # --------------------------------------------
+#     df_plot = _aggregate_frame(
+#         dff,
+#         xlabel=xlabel_final,
+#         y_cols=y_cols,
+#         agg=agg,
+#         distinct_on=distinct_on,
+#         drop_dupes_before_sum=drop_dupes_before_sum,
+#     )
+
+#     # Asegurar DataFrame
+#     if isinstance(df_plot, pd.Series):
+#         df_plot = df_plot.to_frame(name=y_cols[0] if y_cols else "valor")
+
+#     # --------------------------------------------
+#     # Sort opcional
+#     # --------------------------------------------
+#     if sort:
+#         by = sort.get("by", "y")
+#         order = sort.get("order", "desc")
+#         ascending = (order == "asc")
+
+#         if by == "label":
+#             df_plot = df_plot.sort_index(ascending=ascending)
+#         else:
+#             df_plot = df_plot.sort_values(by=df_plot.columns[0], ascending=ascending)
+
+#     # Top-N opcional
+#     if limit_categories and limit_categories > 0:
+#         df_plot = df_plot.head(limit_categories)
+
+#     # --------------------------------------------
+#     # Construir figura
+#     # --------------------------------------------
+#     fig, ax = plt.subplots(figsize=(10, 6))
+
+#     colname = df_plot.columns[0]
+#     ax.bar(df_plot.index.astype(str), df_plot[colname], color=color)
+
+#     ax.set_title(titulo)
+#     ax.set_ylabel(colname)
+#     ax.set_xlabel(xlabel_final)
+#     ax.grid(axis="y", linestyle="--", alpha=0.6)
+
+#     # Rotar etiquetas largas
+#     ax.tick_params(axis="x", rotation=35)
+
+#     # Valores sobre las barras
+#     if show_values:
+#         for i, v in enumerate(df_plot[colname]):
+#             ax.text(i, v, f"{v}", ha="center", va="bottom")
+
+#     # Leyenda opcional
+#     if show_legend:
+#         ax.legend([colname])
+#     else:
+#         leg = ax.get_legend()
+#         if leg:
+#             leg.remove()
+
+#     fig.tight_layout()
+#     return fig, ax
 
 
 
@@ -546,6 +689,199 @@ def graficar_barras(
 #     return fig
 
 
+
+# def graficar_torta(
+#     df: pd.DataFrame,
+#     xlabel: Optional[Union[str, List[str]]] = None,
+#     y: Optional[str] = None,
+#     agg: Union[str, Dict[str, str]] = "sum",
+#     titulo: str = "Gráfico de Torta",
+#     color: Optional[Union[str, List[str]]] = None,
+#     *,
+#     # Controles de filtro/deduplicación
+#     unique_by: Optional[Union[str, List[str]]] = None,
+#     conditions_all: Optional[List[List[Any]]] = None,
+#     conditions_any: Optional[List[Union[List[Any], List[List[Any]]]]] = None,
+#     # Controles de agregación extendida
+#     distinct_on: Optional[str] = None,
+#     drop_dupes_before_sum: bool = False,
+#     # Orden y top-N (opcionales)
+#     sort: Optional[Dict[str, str]] = None,          # {"by": "y"|"label", "order": "asc"|"desc"}
+#     limit_categories: Optional[int] = None,
+# ) -> Tuple[plt.Figure, plt.Axes]:
+#     """
+#     Gráfico de torta con:
+#       - xlabel simple o múltiple
+#       - filtros AND/OR + unique_by
+#       - agregaciones extendidas
+#       - sort + top-N
+#       - etiquetas externas sin superposición (algoritmo propio, sin adjustText)
+#     """
+
+#     # ---------------- Validación base ----------------
+#     if not isinstance(df, pd.DataFrame):
+#         raise TypeError("El parámetro 'df' debe ser un DataFrame de pandas.")
+
+#     # Aceptar múltiples columnas en X → combinar
+#     df2, xlabel_final, _ = _ensure_xlabel(df, xlabel)
+
+#     # ---------------- Determinar Y ----------------
+#     if y is None:
+#         num_cols = df2.select_dtypes(include=[np.number]).columns.tolist()
+#         if not num_cols and not (distinct_on and agg in ("count", "distinct_count")):
+#             raise ValueError("No se encontraron columnas numéricas ni 'distinct_on' para contar.")
+#         y_cols = [num_cols[0]] if num_cols else []
+#     else:
+#         if y not in df2.columns:
+#             raise ValueError(f"La columna '{y}' no existe en el DataFrame.")
+#         y_cols = [y]
+
+#     # ---------------- Filtro + deduplicación previa ----------------
+#     dff = _prefilter_df(
+#         df2,
+#         unique_by=unique_by,
+#         conditions_all=conditions_all,
+#         conditions_any=conditions_any,
+#     )
+
+#     # ---------------- Agregación ----------------
+#     df_plot = _aggregate_frame(
+#         dff,
+#         xlabel=xlabel_final,
+#         y_cols=y_cols,
+#         agg=agg,
+#         distinct_on=distinct_on,
+#         drop_dupes_before_sum=drop_dupes_before_sum,
+#     )
+
+#     # Convertir a serie única
+#     if isinstance(df_plot, pd.DataFrame):
+#         if df_plot.shape[1] != 1:
+#             raise ValueError("El gráfico de torta requiere una única serie numérica después de agregar.")
+#         serie = df_plot.iloc[:, 0]
+#     else:
+#         serie = df_plot
+
+#     # ---------------- Limpieza y agregación por categoría ----------------
+#     serie = serie.replace([np.inf, -np.inf], np.nan).dropna()
+
+#     if serie.empty:
+#         raise ValueError("No hay datos válidos para graficar (todo es NaN/inf o vacío).")
+
+#     # Importante: si hay índices repetidos, se suman → evita duplicar etiquetas
+#     serie = serie.groupby(serie.index).sum()
+
+#     # ---------------- Orden y top-N ----------------
+#     if sort:
+#         by = sort.get("by", "y")
+#         order = sort.get("order", "desc")
+#         asc = (order == "asc")
+#         if by == "label":
+#             serie = serie.sort_index(ascending=asc)
+#         else:
+#             serie = serie.sort_values(ascending=asc)
+
+#     if limit_categories and limit_categories > 0:
+#         serie = serie.head(limit_categories)
+
+#     labels = [str(x) for x in serie.index.tolist()]
+#     values = serie.values.tolist()
+
+#     # ---------------- Colores ----------------
+#     if not color:
+#         color = ["#1976d2", "#ffe066"]  # azul y amarillo por defecto
+
+#     if isinstance(color, str):
+#         color = [color]
+
+#     if len(color) < len(values):
+#         color = (color * ((len(values) // len(color)) + 1))[:len(values)]
+
+#     # ---------------- Gráfico base ----------------
+#     fig, ax = plt.subplots(figsize=(8, 8), facecolor="white")
+
+#     wedges, autotexts = ax.pie(
+#         values,
+#         labels=None,
+#         colors=color,
+#         shadow=True,
+#         explode=[0.04] * len(values),
+#         autopct=lambda pct: f"{pct:.1f}%" if pct > 0 else "",
+#         pctdistance=0.68,
+#         startangle=140,
+#         textprops={"fontsize": 13, "color": "#263238", "fontweight": "bold"},
+#     )
+
+#     for w in wedges:
+#         w.set_edgecolor("#212121")
+#         w.set_linewidth(1.2)
+
+#     # ---------------- Etiquetas externas sin solaparse ----------------
+#     # Pre-calculamos ángulos y lado (izquierda / derecha)
+#     label_info = []
+#     for w, lbl in zip(wedges, labels):
+#         ang = 0.5 * (w.theta2 + w.theta1)
+#         x = np.cos(np.deg2rad(ang))
+#         y = np.sin(np.deg2rad(ang))
+#         side = "right" if x >= 0 else "left"
+#         label_info.append({"wedge": w, "label": lbl, "x": x, "y": y, "side": side})
+
+#     # Ajuste vertical independiente para cada lado
+#     min_delta = 0.12  # distancia mínima entre labels en Y (ajusta si quieres)
+#     offset = 1.25     # radio donde se ubican las etiquetas
+
+#     for side in ("left", "right"):
+#         items = [d for d in label_info if d["side"] == side]
+#         if not items:
+#             continue
+
+#         # Ordenar de abajo hacia arriba
+#         items.sort(key=lambda d: d["y"])
+
+#         # Empujar en Y para separar
+#         for i in range(1, len(items)):
+#             if items[i]["y"] - items[i - 1]["y"] < min_delta:
+#                 items[i]["y"] = items[i - 1]["y"] + min_delta
+
+#         # Dibujar anotaciones y flechas
+#         for d in items:
+#             x_dir = 1 if d["side"] == "right" else -1
+#             x_text = x_dir * offset
+#             y_text = d["y"] * offset
+
+#             ax.annotate(
+#                 d["label"],
+#                 xy=(d["x"] * 0.98, d["y"] * 0.98),  # borde de la torta
+#                 xytext=(x_text, y_text),
+#                 ha="left" if d["side"] == "right" else "right",
+#                 va="center",
+#                 fontsize=14,
+#                 fontweight="bold",
+#                 color="#263238",
+#                 arrowprops=dict(
+#                     arrowstyle="-",
+#                     color="#212121",
+#                     lw=1.1,
+#                     shrinkA=0,
+#                     shrinkB=0,
+#                     connectionstyle="arc3,rad=0.15",
+#                 ),
+#             )
+
+#     # ---------------- Título ----------------
+#     ax.set_title(
+#         titulo,
+#         fontsize=20,
+#         fontweight="bold",
+#         pad=30,
+#         color="#1565c0",
+#     )
+
+#     ax.axis("equal")
+#     fig.tight_layout(pad=3.5)
+
+#     return fig, ax
+
 def graficar_torta(
     df: pd.DataFrame,
     xlabel: Optional[Union[str, List[str]]] = None,
@@ -554,25 +890,15 @@ def graficar_torta(
     titulo: str = "Gráfico de Torta",
     color: Optional[Union[str, List[str]]] = None,
     *,
-    # Controles de filtro/deduplicación
     unique_by: Optional[Union[str, List[str]]] = None,
     conditions_all: Optional[List[List[Any]]] = None,
     conditions_any: Optional[List[Union[List[Any], List[List[Any]]]]] = None,
-    # Controles de agregación extendida
     distinct_on: Optional[str] = None,
     drop_dupes_before_sum: bool = False,
-    # Orden y top-N (opcionales)
-    sort: Optional[Dict[str, str]] = None,          # {"by":"y"|"label","order":"asc"|"desc"}
+    sort: Optional[Dict[str, str]] = None,
     limit_categories: Optional[int] = None,
 ) -> Tuple[plt.Figure, plt.Axes]:
-    """
-    Pie chart con:
-      - xlabel como str o list[str] (se combina con _ensure_xlabel)
-      - filtros AND/OR y unique_by
-      - agregaciones extendidas (distinct_count, sum_distinct, distinct_on)
-      - sort + top-N opcional
-    Requiere UNA sola serie numérica tras la agregación.
-    """
+
     if not isinstance(df, pd.DataFrame):
         raise TypeError("El parámetro 'df' debe ser un DataFrame de pandas.")
 
@@ -590,25 +916,44 @@ def graficar_torta(
             raise ValueError(f"La columna '{y}' no existe en el DataFrame.")
         y_cols = [y]
 
-    # Filtro + deduplicación previa por unique_by
-    dff = _prefilter_df(df2, unique_by=unique_by, conditions_all=conditions_all, conditions_any=conditions_any)
-
-    # Agregar (usa versión multi-X de _aggregate_frame)
-    df_plot = _aggregate_frame(
-        dff, xlabel=xlabel_final, y_cols=y_cols, agg=agg,
-        distinct_on=distinct_on, drop_dupes_before_sum=drop_dupes_before_sum
+    # Filtro + deduplicación previa
+    dff = _prefilter_df(
+        df2,
+        unique_by=unique_by,
+        conditions_all=conditions_all,
+        conditions_any=conditions_any,
     )
 
-    # Asegurar serie única
-    if isinstance(df_plot, pd.DataFrame):
-        if df_plot.shape[1] != 1:
-            raise ValueError("El gráfico de torta requiere una única serie numérica después de agregar.")
-        serie = df_plot.iloc[:, 0]
-    else:
-        serie = df_plot
+    # Agregar
+    df_plot = _aggregate_frame(
+        dff,
+        xlabel=xlabel_final,
+        y_cols=y_cols,
+        agg=agg,
+        distinct_on=distinct_on,
+        drop_dupes_before_sum=drop_dupes_before_sum,
+    )
 
-    # limpiar y ordenar opcionalmente
-    serie = serie.replace([np.inf, -np.inf], np.nan).dropna()
+    # --- aquí cambiamos la lógica para obtener valores y etiquetas ---
+    # Convertir siempre a DataFrame para manipular mejor
+    if isinstance(df_plot, pd.Series):
+        df_plot = df_plot.to_frame(name="valor")
+
+    if df_plot.shape[1] != 1:
+        raise ValueError("El gráfico de torta requiere una única serie numérica después de agregar.")
+
+    # Pasar índice a columna para que las etiquetas vengan de allí
+    df_plot = df_plot.reset_index()
+
+    # Columna numérica
+    col_val = df_plot.columns[-1]
+    # Columna de etiquetas (la primera tras reset_index)
+    col_lab = df_plot.columns[0]
+
+    # Serie numérica limpia
+    serie = df_plot[col_val].replace([np.inf, -np.inf], np.nan).dropna()
+    etiquetas = df_plot.loc[serie.index, col_lab].astype(str)
+
     if serie.empty:
         raise ValueError("No hay datos válidos para graficar (todo es NaN/inf o vacío).")
 
@@ -618,24 +963,133 @@ def graficar_torta(
         order = sort.get("order", "desc")
         ascending = (order == "asc")
         if by == "label":
-            serie = serie.sort_index(ascending=ascending)
+            orden_idx = etiquetas.sort_values(ascending=ascending).index
         else:
-            serie = serie.sort_values(ascending=ascending)
+            orden_idx = serie.sort_values(ascending=ascending).index
+        serie = serie.loc[orden_idx]
+        etiquetas = etiquetas.loc[orden_idx]
+
     if limit_categories and limit_categories > 0:
         serie = serie.head(limit_categories)
+        etiquetas = etiquetas.head(limit_categories)
 
     total = serie.clip(lower=0).sum()
     if total <= 0:
         raise ValueError("La suma de valores es 0; no es posible construir la torta.")
 
-    # plot
+    # Colores
+    if color is None:
+        color = plt.cm.Greens(np.linspace(0.4, 0.8, len(serie)))
+    elif isinstance(color, str):
+        color = [color] * len(serie)
+
+    # Plot
     fig, ax = plt.subplots(figsize=(8, 8))
-    ax.pie(serie.values, labels=serie.index.astype(str), autopct='%1.1f%%', startangle=90, colors=color, shadow=False)
+    ax.pie(
+        serie.values,
+        labels=etiquetas.values,   # 👈 ahora usa la columna categórica, no el índice
+        autopct='%1.1f%%',
+        startangle=90,
+        colors=color,
+        shadow=False,
+    )
     ax.set_title(titulo)
     ax.axis('equal')
     fig.tight_layout()
     return fig, ax
 
+# def graficar_torta(
+#     df: pd.DataFrame,
+#     xlabel: Optional[Union[str, List[str]]] = None,
+#     y: Optional[str] = None,
+#     agg: Union[str, Dict[str, str]] = "sum",
+#     titulo: str = "Gráfico de Torta",
+#     color: Optional[Union[str, List[str]]] = None,
+#     *,
+#     # Controles de filtro/deduplicación
+#     unique_by: Optional[Union[str, List[str]]] = None,
+#     conditions_all: Optional[List[List[Any]]] = None,
+#     conditions_any: Optional[List[Union[List[Any], List[List[Any]]]]] = None,
+#     # Controles de agregación extendida
+#     distinct_on: Optional[str] = None,
+#     drop_dupes_before_sum: bool = False,
+#     # Orden y top-N (opcionales)
+#     sort: Optional[Dict[str, str]] = None,          # {"by":"y"|"label","order":"asc"|"desc"}
+#     limit_categories: Optional[int] = None,
+# ) -> Tuple[plt.Figure, plt.Axes]:
+#     """
+#     Pie chart con:
+#       - xlabel como str o list[str] (se combina con _ensure_xlabel)
+#       - filtros AND/OR y unique_by
+#       - agregaciones extendidas (distinct_count, sum_distinct, distinct_on)
+#       - sort + top-N opcional
+#     Requiere UNA sola serie numérica tras la agregación.
+#     """
+#     if not isinstance(df, pd.DataFrame):
+#         raise TypeError("El parámetro 'df' debe ser un DataFrame de pandas.")
+
+#     # Aceptar múltiples columnas en X → combinar
+#     df2, xlabel_final, _ = _ensure_xlabel(df, xlabel)
+
+#     # Determinar y
+#     if y is None:
+#         num_cols = df2.select_dtypes(include=[np.number]).columns.tolist()
+#         if not num_cols and not (distinct_on and agg in ("count", "distinct_count")):
+#             raise ValueError("No se encontraron columnas numéricas ni 'distinct_on' para contar.")
+#         y_cols = [num_cols[0]] if num_cols else []
+#     else:
+#         if y not in df2.columns:
+#             raise ValueError(f"La columna '{y}' no existe en el DataFrame.")
+#         y_cols = [y]
+
+#     # Filtro + deduplicación previa por unique_by
+#     dff = _prefilter_df(df2, unique_by=unique_by, conditions_all=conditions_all, conditions_any=conditions_any)
+
+#     # Agregar (usa versión multi-X de _aggregate_frame)
+#     df_plot = _aggregate_frame(
+#         dff, xlabel=xlabel_final, y_cols=y_cols, agg=agg,
+#         distinct_on=distinct_on, drop_dupes_before_sum=drop_dupes_before_sum
+#     )
+
+#     # Asegurar serie única y consolidar etiquetas repetidas
+#     if isinstance(df_plot, pd.DataFrame):
+#         if df_plot.shape[1] != 1:
+#             raise ValueError("El gráfico de torta requiere una única serie numérica después de agregar.")
+#         serie = df_plot.iloc[:, 0]
+#     else:
+#         serie = df_plot
+
+#     # 🔥 Paso esencial: evitar etiquetas duplicadas agrupando por índice
+#     serie = serie.groupby(serie.index).sum()
+
+#     # limpiar y ordenar opcionalmente
+#     serie = serie.replace([np.inf, -np.inf], np.nan).dropna()
+#     if serie.empty:
+#         raise ValueError("No hay datos válidos para graficar (todo es NaN/inf o vacío).")
+
+#     # sort / top-N
+#     if sort:
+#         by = sort.get("by", "y")
+#         order = sort.get("order", "desc")
+#         ascending = (order == "asc")
+#         if by == "label":
+#             serie = serie.sort_index(ascending=ascending)
+#         else:
+#             serie = serie.sort_values(ascending=ascending)
+#     if limit_categories and limit_categories > 0:
+#         serie = serie.head(limit_categories)
+
+#     total = serie.clip(lower=0).sum()
+#     if total <= 0:
+#         raise ValueError("La suma de valores es 0; no es posible construir la torta.")
+
+#     # plot
+#     fig, ax = plt.subplots(figsize=(8, 8))
+#     ax.pie(serie.values, labels=serie.index.astype(str), autopct='%1.1f%%', startangle=90, colors=color, shadow=False)
+#     ax.set_title(titulo)
+#     ax.axis('equal')
+#     fig.tight_layout()
+#     return fig, ax
 
 def graficar_barras_horizontal(
     df: pd.DataFrame,
@@ -713,26 +1167,49 @@ def graficar_barras_horizontal(
     if limit_categories and limit_categories > 0:
         df_plot = df_plot.head(limit_categories)
 
-    # Crear figura
-    fig, ax = plt.subplots(figsize=(10, 6))
+    # Crear figura con estilo profesional
+    fig, ax = plt.subplots(figsize=(12, max(6, len(df_plot) * 0.4)), facecolor='white')
+    ax.set_facecolor('#f8f9fa')
 
-    # Construir barra horizontal
+    # Construir barra horizontal con mejor estilo
     colname = df_plot.columns[0]
-    ax.barh(df_plot.index.astype(str), df_plot[colname], color=color)
+    
+    # Color profesional si no se especifica
+    if color is None:
+        color = '#607D8B'  # Azul grisáceo corporativo
+    
+    bars = ax.barh(df_plot.index.astype(str), df_plot[colname], 
+                   color=color, edgecolor='white', linewidth=1.2, alpha=0.9)
+    
+    for bar in bars:
+        bar.set_zorder(3)
 
-    ax.set_title(titulo)
-    ax.set_xlabel(colname)
-    ax.set_ylabel(xlabel_final)
-    ax.grid(axis="x", linestyle="--", alpha=0.6)
+    # Títulos y etiquetas mejoradas
+    ax.set_title(titulo, fontsize=16, fontweight='bold', pad=20, color='#2c3e50')
+    ax.set_xlabel(colname, fontsize=11, fontweight='600', color='#34495e')
+    ax.set_ylabel(xlabel_final if xlabel_final else '', fontsize=11, fontweight='600', color='#34495e')
+    
+    # Grid mejorado
+    ax.grid(axis="x", linestyle="--", alpha=0.3, color='#bdc3c7', zorder=0)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_color('#bdc3c7')
+    ax.spines['bottom'].set_color('#bdc3c7')
+    
+    # Tick styling
+    ax.tick_params(axis="both", labelsize=9, colors='#34495e')
 
-    # Mostrar valores
+    # Mostrar valores con formato mejorado
     if show_values:
         for i, v in enumerate(df_plot[colname]):
-            ax.text(v, i, f"{v}", va='center', ha='left')
+            formatted_val = f"{v:,.0f}" if v >= 1 else f"{v:.2f}"
+            ax.text(v + max(df_plot[colname]) * 0.01, i, formatted_val, 
+                   va='center', ha='left', fontsize=9, fontweight='600', color='#2c3e50')
 
-    # Leyenda
+    # Leyenda mejorada
     if show_legend:
-        ax.legend([colname])
+        ax.legend([colname], loc='lower right', framealpha=0.95, 
+                 edgecolor='#bdc3c7', fontsize=10)
     else:
         leg = ax.get_legend()
         if leg:
@@ -740,6 +1217,110 @@ def graficar_barras_horizontal(
 
     fig.tight_layout()
     return fig, ax
+
+# def graficar_barras_horizontal(
+#     df: pd.DataFrame,
+#     xlabel: Optional[Union[str, List[str]]] = None,
+#     y: Optional[Union[str, List[str]]] = None,
+#     agg: Union[str, Dict[str, str]] = "sum",
+#     titulo: str = "Gráfica de Barras Horizontal",
+#     color: Optional[Union[str, List[str]]] = None,
+#     *,
+#     # Controles adicionales (compatibilidad total)
+#     unique_by: Optional[Union[str, List[str]]] = None,
+#     conditions_all: Optional[List[List[Any]]] = None,
+#     conditions_any: Optional[List[Union[List[Any], List[List[Any]]]]] = None,
+#     distinct_on: Optional[str] = None,
+#     drop_dupes_before_sum: bool = False,
+#     sort: Optional[Dict[str, str]] = None,          # {"by": "y"|"label", "order": "asc"|"desc"}
+#     limit_categories: Optional[int] = None,
+#     show_legend: bool = True,
+#     show_values: bool = False,
+#     **kwargs,   # <<< IMPORTANTE: absorbe parámetros extra
+# ) -> Tuple[plt.Figure, plt.Axes]:
+
+#     # Validación base
+#     if not isinstance(df, pd.DataFrame):
+#         raise TypeError("El parámetro 'df' debe ser un DataFrame de pandas.")
+
+#     # Combinar X
+#     df2, xlabel_final, _ = _ensure_xlabel(df, xlabel)
+
+#     # Determinar columnas numéricas
+#     if y is None:
+#         num_cols = df2.select_dtypes(include=[np.number]).columns.tolist()
+#         if not num_cols and not (distinct_on and agg in ("count", "distinct_count")):
+#             raise ValueError("No se encontraron columnas numéricas ni 'distinct_on'.")
+#         y_cols = [num_cols[0]] if num_cols else []
+#     else:
+#         if y not in df2.columns:
+#             raise ValueError(f"La columna '{y}' no existe en el DataFrame.")
+#         y_cols = [y]
+
+#     # Filtro + deduplicación previa
+#     dff = _prefilter_df(
+#         df2,
+#         unique_by=unique_by,
+#         conditions_all=conditions_all,
+#         conditions_any=conditions_any,
+#     )
+
+#     # Agregación (usa tu agregador unificado)
+#     df_plot = _aggregate_frame(
+#         dff,
+#         xlabel=xlabel_final,
+#         y_cols=y_cols,
+#         agg=agg,
+#         distinct_on=distinct_on,
+#         drop_dupes_before_sum=drop_dupes_before_sum,
+#     )
+
+#     # Asegurar objeto gráfico
+#     if isinstance(df_plot, pd.Series):
+#         df_plot = df_plot.to_frame(name=y_cols[0] if y_cols else "valor")
+
+#     # Ordenamiento opcional
+#     if sort:
+#         by = sort.get("by", "y")
+#         order = sort.get("order", "desc")
+#         ascending = (order == "asc")
+
+#         if by == "label":
+#             df_plot = df_plot.sort_index(ascending=ascending)
+#         else:
+#             df_plot = df_plot.sort_values(by=df_plot.columns[0], ascending=ascending)
+
+#     # Top-N opcional
+#     if limit_categories and limit_categories > 0:
+#         df_plot = df_plot.head(limit_categories)
+
+#     # Crear figura
+#     fig, ax = plt.subplots(figsize=(10, 6))
+
+#     # Construir barra horizontal
+#     colname = df_plot.columns[0]
+#     ax.barh(df_plot.index.astype(str), df_plot[colname], color=color)
+
+#     ax.set_title(titulo)
+#     ax.set_xlabel(colname)
+#     ax.set_ylabel(xlabel_final)
+#     ax.grid(axis="x", linestyle="--", alpha=0.6)
+
+#     # Mostrar valores
+#     if show_values:
+#         for i, v in enumerate(df_plot[colname]):
+#             ax.text(v, i, f"{v}", va='center', ha='left')
+
+#     # Leyenda
+#     if show_legend:
+#         ax.legend([colname])
+#     else:
+#         leg = ax.get_legend()
+#         if leg:
+#             leg.remove()
+
+#     fig.tight_layout()
+#     return fig, ax
 
 
 def graficar_tabla(
@@ -807,37 +1388,197 @@ def graficar_tabla(
             df_display[col] = df_display[col].dt.strftime("%Y-%m-%d")
     df_display = df_display.fillna("").astype(str)
 
-    # Figura
-    n_cols = len(df_display.columns)
-    n_rows = len(df_display)
-    fig_w = max(6, n_cols * 2.5)
-    fig_h = max(2.5, n_rows * 0.5 + 2)
+    # Formatear números con separador de miles
+    df_formatted = df_display.copy()
+    for col in df_display.columns:
+        try:
+            # Intentar formatear como número
+            numeric_col = pd.to_numeric(df_display[col], errors='coerce')
+            if numeric_col.notna().any():
+                df_formatted[col] = numeric_col.apply(
+                    lambda x: f"{x:,.0f}" if pd.notna(x) and x >= 1 else 
+                             (f"{x:.2f}" if pd.notna(x) else "")
+                )
+        except:
+            pass
+    
+    # Figura con diseño profesional y más grande
+    n_cols = len(df_formatted.columns)
+    n_rows = len(df_formatted)
+    fig_w = max(18, n_cols * 4.5)
+    fig_h = max(9, n_rows * 2.2 + 6)
 
-    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h), facecolor='white')
     ax.axis("off")
+
     tabla = ax.table(
-        cellText=df_display.values.tolist(),
-        colLabels=df_display.columns.tolist(),
+        cellText=df_formatted.values.tolist(),
+        colLabels=df_formatted.columns.tolist(),
         cellLoc="center",
-        loc="center"
+        loc="center",
+        colWidths=[0.28] * n_cols
     )
     tabla.auto_set_font_size(False)
-    tabla.set_fontsize(10)
-    tabla.scale(1.1, 1.2)
+    tabla.set_fontsize(28)
+    tabla.scale(2.2, 4.2)
+
     for col_idx in range(n_cols):
         tabla.auto_set_column_width(col=col_idx)
 
-    header_bg = color if color else "#25347a"
+    # Color solo para encabezado, filas blancas
+    if color and "," in color:
+        color_list = [c.strip() for c in color.split(",") if c.strip()]
+    elif color:
+        color_list = [color]
+    else:
+        color_list = ["#2E86AB"]
+
+    header_bg = "#1565c0"  # azul más oscuro para encabezado
+
+    import numpy as np
+    from matplotlib.colors import LinearSegmentedColormap
+    grad_cmap = LinearSegmentedColormap.from_list("excel_blue_grad", ["#1565c0", "#42a5f5"])
+    grad_img = np.linspace(0, 1, 256).reshape(1, -1)
+    row_colors = ['#e3f2fd', '#ffffff']  # Azul claro y blanco alternados
+    # Alternancia de colores en filas de datos según la lista de colores
+    from matplotlib.colors import to_rgb, to_hex
+    def aclarar_color(color, factor=0.7):
+        rgb = to_rgb(color)
+        aclarado = tuple(1 - (1 - c) * factor for c in rgb)
+        return to_hex(aclarado)
+    def oscurecer_color(color, factor=0.7):
+        rgb = to_rgb(color)
+        oscurecido = tuple(c * factor for c in rgb)
+        return to_hex(oscurecido)
+
+    # El primer color es para encabezado, los demás para datos
+    if len(color_list) > 1:
+        header_bg = oscurecer_color(color_list[0], 0.7)
+        data_colors = [aclarar_color(c, 0.85) for c in color_list[1:]]
+    else:
+        header_bg = oscurecer_color(color_list[0] if color_list else "#1976d2", 0.7)
+        data_colors = [aclarar_color(header_bg, 0.85), aclarar_color(header_bg, 0.93)]
+    n_rows = len(df_formatted)
     for (row, col), cell in tabla.get_celld().items():
         if row == 0:
-            cell.set_text_props(weight="bold", color="white")
+            # Si el fondo es blanco, texto negro; si no, texto blanco
+            text_color = "#212121" if header_bg.lower() in ["#fff", "#ffffff", "white"] else "white"
+            cell.set_text_props(weight="bold", color=text_color, fontsize=36)
             cell.set_facecolor(header_bg)
         else:
-            cell.set_facecolor("#f9f9f9" if (row % 2 == 1) else "white")
+            valor = cell.get_text().get_text()
+            try:
+                float(valor.replace(',', ''))
+                cell.set_text_props(color="#212121", fontsize=32, weight="bold")
+            except:
+                cell.set_text_props(color="#2c3e50", fontsize=28, weight="normal")
+            # Alternar colores aclarados para filas de datos
+            color_idx = (row - 1) % len(data_colors)
+            cell.set_facecolor(data_colors[color_idx])
+        cell.set_edgecolor('#424242')
+        cell.set_linewidth(1.5)
+        cell.PAD = 0.42
 
-    ax.set_title(titulo, fontsize=13, fontweight="bold", pad=20)
-    fig.tight_layout()
+    # Título profesional
+    ax.set_title(titulo, fontsize=38, fontweight="bold", pad=60, color="#000000")
+    fig.tight_layout(pad=6.5)
     return fig, ax
+# def graficar_tabla(
+#     df: pd.DataFrame,
+#     xlabel: Optional[Union[str, List[str]]] = None,
+#     y: Optional[Union[str, List[str]]] = None,
+#     agg: Union[str, Dict[str, str]] = "sum",
+#     titulo: str = "Tabla de Datos",
+#     color: Optional[str] = None,
+#     *,
+#     # Filtros / deduplicación
+#     unique_by: Optional[Union[str, List[str]]] = None,
+#     conditions_all: Optional[List[List[Any]]] = None,
+#     conditions_any: Optional[List[Union[List[Any], List[List[Any]]]]] = None,
+#     # Agregación extendida
+#     distinct_on: Optional[str] = None,
+#     drop_dupes_before_sum: bool = False,
+#     where: Optional[pd.Series] = None,
+# ) -> Tuple[plt.Figure, plt.Axes]:
+#     """
+#     Tabla con:
+#       - xlabel como str o list[str] (se combina con _ensure_xlabel)
+#       - filtros AND/OR, unique_by, distinct_on y agregaciones extendidas
+#     """
+#     if not isinstance(df, pd.DataFrame):
+#         raise TypeError("El parámetro 'df' debe ser un DataFrame de pandas.")
+
+#     # Aceptar multi-X → combinar etiquetas
+#     df2, xlabel_final, _ = _ensure_xlabel(df, xlabel)
+
+#     # y_cols
+#     if y is None:
+#         y_cols = df2.select_dtypes(include=[np.number]).columns.tolist()
+#         # permitir tablas con conteo único vía distinct_on aun si no hay numéricas
+#         if not y_cols and not (distinct_on and isinstance(agg, str) and agg in ("count", "distinct_count")):
+#             raise ValueError("No se encontraron columnas numéricas para la tabla.")
+#     elif isinstance(y, str):
+#         if y not in df2.columns:
+#             raise ValueError(f"La columna '{y}' no existe en el DataFrame.")
+#         y_cols = [y]
+#     else:
+#         missing = [col for col in y if col not in df2.columns]
+#         if missing:
+#             raise ValueError(f"Las siguientes columnas no existen en el DataFrame: {missing}")
+#         y_cols = y
+
+#     # Filtro y deduplicación previa
+#     dff = _prefilter_df(df2, unique_by=unique_by, conditions_all=conditions_all, conditions_any=conditions_any)
+
+#     # Agregar (respeta distinct_count / sum_distinct / distinct_on)
+#     df_plot = _aggregate_frame(
+#         dff, xlabel=xlabel_final, y_cols=y_cols, agg=agg,
+#         distinct_on=distinct_on, drop_dupes_before_sum=drop_dupes_before_sum, where=where
+#     )
+
+#     # Reset index para mostrar categoría(s) como columna(s)
+#     df_plot = df_plot.reset_index() if xlabel_final is not None else df_plot.reset_index(drop=True)
+
+#     # Formateo
+#     df_display = df_plot.copy()
+#     for col in df_display.columns:
+#         if is_numeric_dtype(df_display[col]):
+#             df_display[col] = df_display[col].round(2)
+#         elif is_datetime64_any_dtype(df_display[col]):
+#             df_display[col] = df_display[col].dt.strftime("%Y-%m-%d")
+#     df_display = df_display.fillna("").astype(str)
+
+#     # Figura
+#     n_cols = len(df_display.columns)
+#     n_rows = len(df_display)
+#     fig_w = max(6, n_cols * 2.5)
+#     fig_h = max(2.5, n_rows * 0.5 + 2)
+
+#     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+#     ax.axis("off")
+#     tabla = ax.table(
+#         cellText=df_display.values.tolist(),
+#         colLabels=df_display.columns.tolist(),
+#         cellLoc="center",
+#         loc="center"
+#     )
+#     tabla.auto_set_font_size(False)
+#     tabla.set_fontsize(10)
+#     tabla.scale(1.1, 1.2)
+#     for col_idx in range(n_cols):
+#         tabla.auto_set_column_width(col=col_idx)
+
+#     header_bg = color if color else "#25347a"
+#     for (row, col), cell in tabla.get_celld().items():
+#         if row == 0:
+#             cell.set_text_props(weight="bold", color="white")
+#             cell.set_facecolor(header_bg)
+#         else:
+#             cell.set_facecolor("#f9f9f9" if (row % 2 == 1) else "white")
+
+#     ax.set_title(titulo, fontsize=13, fontweight="bold", pad=20)
+#     fig.tight_layout()
+#     return fig, ax
 # import pandas as pd
 # from pandas.api.types import is_numeric_dtype, is_datetime64_any_dtype
 # from typing import Optional, List, Any, Union, Tuple
@@ -1185,7 +1926,7 @@ def plot_from_params(df, params, *, show: bool=False):
     agg     = p.get("agg", "sum")
     titulo  = p.get("title", "Gráfico")
     color   = p.get("color")
-    tipo    = p.get("tipo") 
+    tipo    = p.get("tipo")
 
     # --- Formateo general ---
     tick_fontsize = int(p.get("tick_fontsize", 9))
@@ -1255,7 +1996,7 @@ def plot_from_params(df, params, *, show: bool=False):
 
         xlabel = out_col
 
- 
+
     # --- Preparar kwargs comunes ---
     common_kwargs = dict(
         xlabel=xlabel,
@@ -1364,7 +2105,7 @@ def plot_from_params(df, params, *, show: bool=False):
 #     agg     = p.get("agg", "sum")
 #     titulo  = p.get("title", "Gráfico")
 #     color   = p.get("color")
-#     tipo    = p.get("tipo") 
+#     tipo    = p.get("tipo")
 
 #         # controles de formateo con defaults
 #     tick_fontsize = int(p.get("tick_fontsize", 9))

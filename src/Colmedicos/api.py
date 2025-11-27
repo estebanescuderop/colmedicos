@@ -2,7 +2,8 @@
 from Colmedicos.ia import ask_gpt5, portada_gpt5
 from Colmedicos.io_utils import generar_output, aplicar_data_por_tipo_desde_output, aplicar_ia_por_tipo, aplicar_plot_por_tipo_desde_output, exportar_output_a_html, mostrar_html, limpiar_output_dataframe
 from Colmedicos.registry import register
-from Colmedicos.io_utils_remaster import process_ia_blocks, process_data_blocks, process_plot_blocks, _render_vars_text, parse_plot_blocks, parse_ia_blocks, parse_data_blocks, exportar_output_a_html, _fig_to_data_uri, _format_result_plain, columnas_a_texto,aplicar_multiples_columnas_gpt5, limpieza_final
+from Colmedicos.io_utils_remaster import process_ia_blocks, process_data_blocks, process_plot_blocks, _render_vars_text, parse_plot_blocks, parse_ia_blocks, parse_data_blocks, exportar_output_a_html, _fig_to_data_uri, _format_result_plain, columnas_a_texto,aplicar_multiples_columnas_gpt5, limpieza_final,  unpivot_df, dividir_columna_en_dos, procesar_codigos_cie10, unir_dataframes
+import pandas as pd
 
 # Colmedicos/api.py
 import time
@@ -224,6 +225,21 @@ def informe_final(
     escribir_archivo: bool = True,
     modo_rapido_plots: bool = True,
     generar_portada: bool = True,
+    aplicar_cie10: bool = False,
+    aplicar_union: bool = False,
+    aplicar_unpivot: bool = False,
+    aplicar_split: bool = False,
+    # parámetros de cada transformación
+    col_texto_cie10: str = None,
+    df_union: pd.DataFrame = None,
+    col_df1: str = None,
+    col_df2: str = None,
+    columnas_unpivot: list = None,
+    col_split: str = None,
+    sep_split: str = None,
+    nombre_col1: str = None,
+    nombre_col2: str = None,
+    eliminar_original_split: bool = True,
 ) -> Tuple[str, Dict[str, Any]]:
     """
     Versión optimizada con:
@@ -232,8 +248,48 @@ def informe_final(
       - opción para evitar E/S a disco
     """
 
+    df_out = df_datos.copy()
+
     # Manipulacion columnas
-    df_datos = aplicar_multiples_columnas_gpt5(df_datos, tareas)
+    df_out = aplicar_multiples_columnas_gpt5(df_out, tareas)
+    print("Columnas creadas con éxito")
+    # 1) PROCESAR CIE10 ----------------------------------
+    if aplicar_cie10:
+        if not col_texto_cie10:
+            raise ValueError("Debe especificar col_texto_cie10 cuando aplicar_cie10=True")
+        df_out = procesar_codigos_cie10(df_out, columna_texto=col_texto_cie10)
+        print("✔ Transformación CIE10 aplicada")
+
+    # 2) UNION DE DATAFRAMES ------------------------------
+    if aplicar_union:
+        if df_union is None or not col_df1 or not col_df2:
+            raise ValueError("Debe especificar df_union, col_df1 y col_df2 cuando aplicar_union=True")
+        df_out = unir_dataframes(df_out, df_union, col_df1, col_df2)
+        print("✔ Unión de DataFrames aplicada")
+
+    # 3) UNPIVOT -------------------------------------------
+    if aplicar_unpivot:
+        if columnas_unpivot is None:
+            raise ValueError("Debe especificar columnas_unpivot cuando aplicar_unpivot=True")
+        df_out = unpivot_df(df_out, columnas_unpivot=columnas_unpivot)
+        print("✔ Unpivot aplicado")
+
+    # 4) DIVIDIR COLUMNA EN DOS ---------------------------
+    if aplicar_split:
+        if not col_split or not sep_split or not nombre_col1 or not nombre_col2:
+            raise ValueError("Debe especificar parámetros del split cuando aplicar_split=True")
+
+        df_out = dividir_columna_en_dos(
+            df_out,
+            columna=col_split,
+            caracter_separador=sep_split,
+            nombre_col1=nombre_col1,
+            nombre_col2=nombre_col2,
+            eliminar_original=eliminar_original_split
+        )
+        print("✔ División de columna aplicada")
+
+    df_datos = df_out
 
     import time, re
 

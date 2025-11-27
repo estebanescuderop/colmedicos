@@ -24,6 +24,49 @@ df_datos = pd.read_excel(ruta_archivos)
 
 informe_final_test(df,df_datos,ctx,valor_tipo_objetivo="Fijo con IA",reemplazar_en_html=True,token_reemplazo="#GRAFICA#")
 
+
+
+import pandas as pd
+
+def unpivot_df(df: pd.DataFrame,
+               columnas_unpivot: list,
+               nombre_columna_variable: str = "variable",
+               nombre_columna_valor: str = "valor") -> pd.DataFrame:
+    """
+    Realiza un unpivot (melt) de un conjunto de columnas específicas
+    y devuelve un dataframe transformado.
+
+    Parámetros:
+    -----------
+    df : pd.DataFrame
+        DataFrame original.
+    columnas_unpivot : list
+        Columnas que deseo convertir a dos columnas (variable/valor).
+    nombre_columna_variable : str
+        Nombre de la columna resultante que tendrá el nombre original de la columna unpivot.
+    nombre_columna_valor : str
+        Nombre de la columna resultante con el valor correspondiente.
+
+    Retorna:
+    --------
+    pd.DataFrame transformado
+    """
+
+    # Columnas que NO se unpivotan
+    columnas_id = [c for c in df.columns if c not in columnas_unpivot]
+
+    # Melt
+    df_unpivot = df.melt(
+        id_vars=columnas_id,
+        value_vars=columnas_unpivot,
+        var_name=nombre_columna_variable,
+        value_name=nombre_columna_valor
+    )
+
+    return df_unpivot
+
+
+
 #df_out = generar_output(df)
 
 

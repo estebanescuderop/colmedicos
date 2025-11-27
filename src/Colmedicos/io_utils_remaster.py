@@ -1106,13 +1106,6 @@ def columnas_a_texto(df: pd.DataFrame, col1: str, col2: str, *,
     return sep.join(piezas)
 
 
-
-
-
-
-
-import re
-
 def limpieza_final(texto: str) -> str:
     # eliminar todo lo que esté entre #...#
     texto = re.sub(r"#.*?#", "", texto, flags=re.DOTALL)
@@ -1127,3 +1120,166 @@ def limpieza_final(texto: str) -> str:
     #texto = re.sub(r" +\n", "\n", texto)
 
     return texto.strip()
+
+
+
+def unpivot_df(df: pd.DataFrame,
+               columnas_unpivot: list,
+               nombre_columna_variable: str = "variable",
+               nombre_columna_valor: str = "valor") -> pd.DataFrame:
+    """
+    Realiza un unpivot (melt) de un conjunto de columnas específicas
+    y devuelve un dataframe transformado.
+
+    Parámetros:
+    -----------
+    df : pd.DataFrame
+        DataFrame original.
+    columnas_unpivot : list
+        Columnas que deseo convertir a dos columnas (variable/valor).
+    nombre_columna_variable : str
+        Nombre de la columna resultante que tendrá el nombre original de la columna unpivot.
+    nombre_columna_valor : str
+        Nombre de la columna resultante con el valor correspondiente.
+
+    Retorna:
+    --------
+    pd.DataFrame transformado
+    """
+    cols_faltantes = [c for c in columnas_unpivot if c not in df.columns]
+    if cols_faltantes:
+            raise KeyError(f"Las siguientes columnas no están en el DataFrame: {cols_faltantes}")
+    
+    # Columnas que NO se unpivotan
+    columnas_id = [c for c in df.columns if c not in columnas_unpivot]
+
+    # Melt
+    df_unpivot = df.melt(
+        id_vars=columnas_id,
+        value_vars=columnas_unpivot,
+        var_name=nombre_columna_variable,
+        value_name=nombre_columna_valor
+    )
+
+    return df_unpivot
+
+def dividir_columna_en_dos(
+    df: pd.DataFrame,
+    columna: str,
+    caracter_separador: str = "-",    # caracter especial a buscar
+    nombre_col1: str = "parte_1",
+    nombre_col2: str = "parte_2",
+    eliminar_original: bool = False,
+) -> pd.DataFrame:
+
+    # 1. Validación
+    if columna not in df.columns:
+        raise KeyError(f"La columna '{columna}' no existe en el DataFrame.")
+
+    # 2. Convertir a texto para evitar errores con valores nulos o numéricos
+    serie = df[columna].astype(str)
+
+    # 3. Dividir solo en el PRIMER separador encontrado
+    partes = serie.str.split(caracter_separador, n=1, expand=True)
+
+    # Si no encuentra el separador, crear columnas sin dividir
+    if partes.shape[1] == 1:
+        partes[1] = None
+
+    # 4. Asignar columnas limpias
+    df[nombre_col1] = partes[0].str.strip()
+    df[nombre_col2] = partes[1].str.strip() if partes.shape[1] > 1 else None
+
+    # 5. Eliminar columna original si se requiere
+    if eliminar_original:
+        df = df.drop(columns=[columna])
+
+    return df
+
+
+def procesar_codigos_cie10(
+    df: pd.DataFrame,
+    columna_texto: str = "obs_diagnostico",
+    columnas_eliminar: list = "firma"
+) -> pd.DataFrame:
+    """
+    Extrae códigos CIE10 de una columna, los normaliza, los explota en filas
+    y devuelve un DataFrame transformado.
+    
+    Parámetros:
+        df: DataFrame de entrada
+        columna_texto: Nombre de la columna que contiene los textos con códigos
+        columnas_eliminar: Lista opcional de columnas a eliminar después del explode
+        
+    Retorna:
+        DataFrame transformado con 1 fila por código CIE10 encontrado.
+    """
+
+    # --- 1. Función interna para extraer códigos ---
+    def extraer_codigos(texto):
+        if pd.isna(texto):
+            return []
+        
+        texto = str(texto)
+
+        # Busca patrones tipo CIE10|J45:
+        codigos = re.findall(r"CIE10\|([A-Z0-9]+)\s*:", texto)
+
+        # Normalizar y eliminar repetidos preservando orden
+        codigos = list(dict.fromkeys([c.strip().upper() for c in codigos]))
+
+        return codigos
+
+    # --- 2. Crear columna con lista de códigos ---
+    df = df.copy()
+    df["__cie10_list"] = df[columna_texto].apply(extraer_codigos)
+
+    # --- 3. Explode: una fila por código ---
+    df = df.explode("__cie10_list", ignore_index=True)
+
+    # --- 4. Reemplazar columna original por el código extraído ---
+    df[columna_texto] = df["__cie10_list"]
+
+    # --- 5. Eliminar columnas auxiliares ---
+    cols_drop = ["__cie10_list"]
+    if columnas_eliminar:
+        cols_drop.extend(columnas_eliminar)
+
+    df = df.drop(columns=[col for col in cols_drop if col in df.columns])
+
+    return df
+
+def unir_dataframes(
+    df1: pd.DataFrame,
+    df2: pd.DataFrame,
+    col_df1: str,
+    col_df2: str,
+    tipo_union: str = "left"
+) -> pd.DataFrame:
+    """
+    Une dos DataFrames usando diferentes columnas de enlace.
+
+    Parámetros:
+        df1: Primer DataFrame (base)
+        df2: Segundo DataFrame
+        col_df1: Nombre de la columna en df1 para unir
+        col_df2: Nombre de la columna en df2 para unir
+        tipo_union: Tipo de unión ('left', 'right', 'inner', 'outer')
+
+    Retorna:
+        DataFrame unido según los parámetros especificados.
+    """
+
+    if col_df1 not in df1.columns:
+        raise KeyError(f"La columna {col_df1} no existe en df1")
+    if col_df2 not in df2.columns:
+        raise KeyError(f"La columna {col_df2} no existe en df2")
+
+    df_merged = df1.merge(
+        df2,
+        left_on=col_df1,
+        right_on=col_df2,
+        how=tipo_union
+    )
+
+    return df_merged

@@ -1,6 +1,5 @@
 
-from Colmedicos.io_utils_remaster import process_ia_blocks, process_data_blocks, process_plot_blocks, _render_vars_text, parse_plot_blocks, parse_ia_blocks, parse_data_blocks, exportar_output_a_html, _fig_to_data_uri, _format_result_plain, columnas_a_texto, unir_idx_params_con_span_json, aplicar_multiples_columnas_gpt5
-
+from Colmedicos.io_utils_remaster import process_ia_blocks, process_data_blocks, process_plot_blocks, _render_vars_text, parse_plot_blocks, parse_ia_blocks, parse_data_blocks, exportar_output_a_html, _fig_to_data_uri, _format_result_plain, columnas_a_texto, unir_idx_params_con_span_json, aplicar_multiples_columnas_gpt5, unpivot_df, dividir_columna_en_dos, procesar_codigos_cie10, unir_dataframes
 import pandas as pd
 from Colmedicos.ia import ask_gpt5, operaciones_gpt5, graficos_gpt5,portada_gpt5
 from Colmedicos.io_utils import aplicar_plot_por_tipo_desde_output, aplicar_ia_por_tipo, generar_output, mostrar_html
@@ -11,7 +10,7 @@ from Colmedicos.api import informe_final
 
 
 # Ruta del archivo Excel
-ruta_archivo = r"C:\Users\EstebanEscuderoPuert\Downloads\Ejemplo tabla.xlsx"
+ruta_archivo = r"C:\Users\EstebanEscuderoPuert\Downloads\de_ejemplo.xlsx"
 # Lee el archivo Excel (por defecto lee la primera hoja)
 df = pd.read_excel(ruta_archivo)
 
@@ -24,82 +23,244 @@ ctx = {
     "totales": 500
 }
 
-
+otra_ruta = r"C:\Users\EstebanEscuderoPuert\Downloads\Muestreo 10 informes.xlsx"
 # Ruta del archivo Excel
-ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\Informe pruebas colmedicos\Copaltas_colmedicos.xlsx"
+ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\Tabla base ejemplo total.xlsx"
 df_datos = pd.read_excel(ruta_archivos)
+maes_cie10 = r"C:\Users\EstebanEscuderoPuert\Downloads\cie10_maestro_limpio.xlsx"
+df_maestro = pd.read_excel(maes_cie10)
 
 
-tareas = [
-
-    # 1. Clasificación osteomuscular
-    {
-        "criterios": { 
-            "No caso": "Se usa si trabajadores que no presentan síntomas ni hallazgos clínicos compatibles con desórdenes musculoesqueléticos en el momento de la evaluación",
-            "Sintomático": "Se usa si trabajadores que refieren molestias musculoesqueléticas (como dolor, rigidez o fatiga muscular), pero sin evidencia clínica o funcional suficiente para confirmar un diagnostico ocupacional.",
-            "Caso confirmado": "Se usa si trabajadores que presentan síntomas persistentes acompañados de hallazgos físicos, antecedentes y pruebas clínicas"
-        },
-        "registro_cols": "obs_osteomuscular",
-        "nueva_columna": "Clas_osteomuscular"
-    },
-
-    # 2. Riesgo cardiovascular
-    {
-        "criterios": {
-            "Riesgo Bajo": "Se usa si no hay ningún factor presente (IMC menor que 25, presion normal menor 130/80, talla normal es decir menor 88 mujeres y 102 hombres)",
-            "Riesgo Moderado": "Se usa si se existe al menos 1 factor presente (ej. solo IMC elevado o solo presion elevado o solo talla por encima de lo normal).",
-            "Riesgo Alto": "Se usa si se cumplen 2 o más factores presentes(ej, IMC elevador y presión elevada)"
-        },
-        "registro_cols": ["talla", "imc", "presion", "genero"],
-        "nueva_columna": "tipo_riesgo_cardiovascular"
-    },
-
-    # 3. Reporte de sintomatología
-    {
-        "criterios": {
-            "SI": "Se usa si los trabajadores reportan o manifiestan síntomas verbalmente durante la valoración médica ocupacional",
-            "NO": "Se usa si los trabajadores NO reportan o manifiestan síntomas verbalmente durante la valoración médica ocupacional"
-        },
-        "registro_cols": "obs_revsistemas",
-        "nueva_columna": "Reporte sintomatologia"
-    },
-
-    # 4. Antecedentes patológicos ocupacionales
-    {
-        "criterios": {
-            "No refiere antecedentes patologicos ocupacionales": "Se usa si se manifiesta explícitamente que no refiere ningún antecedente patológico ocupacional o se encuentre vacío",
-            "Si refiere antecedentes patologicos ocupacionales": "Se usa en todos los demás casos donde refiere cualquier tipo de antecedente patológico"
-        },
-        "registro_cols": "obs_antecedpatocupacional",
-        "nueva_columna": "Antecedentes Patologicos"
-    },
-
-    # 5. Práctica de deporte
-    {
-        "criterios": {
-            "No": "Se usa si no hay ningún valor",
-            "Si": "Si manifiesta por lo menos alguna periodicidad"
-        },
-        "registro_cols": "habitos_deportes1",
-        "nueva_columna": "Practica deporte regularmente"
-    },
-
-    # 6. Consumo de licor
-    {
-        "criterios": {
-            "No": "Se usa si es un exbebedor o está vacío",
-            "Si": "Se usa si manifiesta claramente que bebe en alguna periodicidad"
-        },
-        "registro_cols": "habitos_licor1",
-        "nueva_columna": "Consume licor regularmente"
-    },
+columnas = [
+    "Pruebas Infecciosas (coprologico)-Blastocistis Hominis",
+    "Pruebas Infecciosas (coprologico)-Helmintos",
+    "Pruebas Infecciosas (coprologico)-Leucocitos",
+    "Pruebas Infecciosas (coprologico)-Protozoos",
+    "Pruebas Infecciosas-Frotis De Uñas",
+    "Pruebas Infecciosas-Frotis Faringeo",
+    "Hemograma-Hematocrito",
+    "Hemograma-Hemoglobina",
+    "Hemograma-Linfocitos",
+    "Hemograma-Leucocitos",
+    "Hemograma-Mxd # (Eosinofilos, Basofilos, Monocitos)",
+    "Hemograma-Plaquetas (Plt)",
+    "Perfil Renal-Nitrogeno Ureico",
+    "Perfil Renal-Creatinina En Suero",
+    "Perfil Metabolico-Colesterol Hdl",
+    "Perfil Metabolico-Colesterol Ldl",
+    "Perfil Metabolico-Colesterol Total",
+    "Perfil Metabolico-Trigliceridos",
+    "Perfil Metabolico-Glicemia Simple",
+    "Perfil Metabolico-Tsh Hormona Estimulante Tiroides",
+    "Perfil Hepatico-Transaminasa Glutamico Oxalacetina (Tgo-Ast)",
+    "Perfil Hepatico-Transaminasa Glutamico Piruvica (Tgp-Alt)",
+    "Alcohol y sustancias psicoactivas-Anfetaminas",
+    "Alcohol y sustancias psicoactivas-Benzodiacepinas",
+    "Alcohol y sustancias psicoactivas-Alcohol",
+    "Alcohol y sustancias psicoactivas-Cocaina",
+    "Alcohol y sustancias psicoactivas-Marihuana",
+    "Alcohol y sustancias psicoactivas-Morfina (Opiaceos)",
+    "Citoquimico de Orina-Densidad (Orina)",
+    "Citoquimico de Orina-Ph(Orina)",
+    "Citoquimico de Orina-Nitritos(Orina)",
+    "Citoquimico de Orina-Leucocitos(Orina)",
+    "Citoquimico de Orina-Proteinas(Orina)",
+    "Citoquimico de Orina-Sangre En Orina",
+    "Citoquimico de Orina-Sedimento(Orina)",
+    "Hemoclasificacion-Hemoclasificacion ( Grupo)",
+    "Hemoclasificacion-Hemoclasificacion ( Rh )",
+    "NA-Plomo en Sangre",
+    "NA-Cromo en orina",
+    "NA-Niquel en orina"
 ]
 
-inf, meta = informe_final(df,df_datos,ctx,tareas=tareas,salida_html=r"C:\Users\EstebanEscuderoPuert\Downloads\Informe pruebas colmedicos\informes\informe_prueba.html")
+
+
+
+# df_otro = procesar_codigos_cie10(df_datos, columna_texto="obs_diagnostico")
+# df_otro = unir_dataframes(df_otro,df_maestro,col_df1="obs_diagnostico",col_df2="Code")
+# df_otro = unpivot_df(df_otro,columnas_unpivot=columnas)
+# df_otro = dividir_columna_en_dos(df_otro,columna="variable",caracter_separador="-",nombre_col1="Tipo prueba",nombre_col2="Prueba", eliminar_original=True)
+# df_otro.to_excel(r"C:\Users\EstebanEscuderoPuert\Downloads\output_.xlsx", index=False, engine="openpyxl")
+# print(df_otro.head(10))
+
+tareas = [
+    {
+      "criterios": {
+        "No caso": "Se usa si trabajadores que no presentan síntomas...",
+        "Sintomático": "Se usa si trabajadores que refieren molestias...",
+        "Caso confirmado": "Se usa si trabajadores que presentan síntomas persistentes..."
+      },
+      "registro_cols": "obs_osteomuscular",
+      "nueva_columna": "Clas_osteomuscular"
+    },
+
+    {
+      "criterios": {
+        "Riesgo Bajo": "Se usa si no hay ningún factor presente...",
+        "Riesgo Moderado": "Se usa si se existe al menos 1 factor...",
+        "Riesgo Alto": "Se usa si se cumplen 2 o más factores..."
+      },
+      "registro_cols": ["talla", "imc", "presion", "genero"],
+      "nueva_columna": "tipo_riesgo_cardiovascular"
+    },
+
+    {
+      "criterios": {
+        "SI": "Se usa si los trabajadores reportan o manifiestan síntomas...",
+        "NO": "Se usa si los trabajadores NO reportan síntomas..."
+      },
+      "registro_cols": "obs_revsistemas",
+      "nueva_columna": "Reporte sintomatologia"
+    },
+
+    {
+      "criterios": {
+        "No refiere antecedentes patologicos ocupacionales": "Se usa si se manifiesta que no refiere antecedentes...",
+        "Si refiere antecedentes patologicos ocupacionales": "Se usa en todos los demás casos..."
+      },
+      "registro_cols": "obs_antecedpatocupacional",
+      "nueva_columna": "Antecedentes Patologicos"
+    },
+
+    {
+      "criterios": {
+        "No": "Se usa si no hay ningun valor",
+        "Si": "Si manifiesta periodicidad"
+      },
+      "registro_cols": "habitos_deportes1",
+      "nueva_columna": "Practica deporte regularmente"
+    },
+
+    {
+      "criterios": {
+        "No": "Se usa si es un exbebedor o está vacío",
+        "Si": "Se usa si manifiesta que bebe"
+      },
+      "registro_cols": "habitos_licor1",
+      "nueva_columna": "Consume licor regularmente"
+    },
+
+    {
+      "criterios": {
+        "NO REALIZADA.": "Se clasifica como NO REALIZADA cuando el texto indica ausencia de prueba o que no aplica, incluyendo expresiones como 'no realizada', 'no aplica', con o sin puntuación.",
+        "REALIZADA.": "Se clasifica como REALIZADA cuando la prueba fue efectivamente realizada, independientemente de si se describe resultado o no.",
+        "Su capacidad visual es adecuada para la ocupación.": "Se usa cuando se describe capacidad visual adecuada, normal o sin alteraciones relevantes para el desempeño laboral habitual.",
+        "Su capacidad visual actual es adecuada, con el uso de la corrección formulada.": "Se usa cuando la visión es adecuada gracias al uso de lentes o corrección óptica formulada.",
+        "Su capacidad visual es deficiente pero no le genera restricciones para la ocupación. Requiere ser corregida.": "Se usa cuando la capacidad visual presenta disminución o deficiencia leve que puede corregirse y no genera restricciones laborales.",
+        "Su capacidad visual es insuficiente y requiere evaluación por especialista para establecer posibilidad de mejoramiento.": "Se usa cuando la visión está disminuida de forma significativa y requiere valoración por oftalmología u optometría especializada.",
+        "Tiene una pérdida de su capacidad visual por un ojo y no es posible su corrección o mejoramiento.": "Se usa cuando existe pérdida visual irreversible en un ojo sin posibilidad de mejoría."
+      },
+      "registro_cols": "visiometria",
+      "nueva_columna": "visiometria"
+    },
+
+    {
+      "criterios": {
+        "NO REALIZADA.": "Se usa cuando la prueba no fue realizada o se reporta como no aplica, incluyendo variaciones en puntuación o mayúsculas.",
+        "REALIZADA.": "Se usa cuando la espirometría fue efectivamente realizada.",
+        "Su capacidad respiratoria es adecuada para la ocupación.": "Se usa cuando la capacidad respiratoria es normal o adecuada para el trabajo, sin limitaciones clínicamente relevantes.",
+        "Su capacidad respiratoria está ligeramente alterada.": "Se usa cuando se describe una alteración leve, sin repercusión ocupacional significativa.",
+        "Su capacidad respiratoria está disminuida. No se recomienda que labore en ambientes con factores de riesgo respiratorio.": "Se usa cuando la prueba indica disminución respiratoria moderada o marcada que contraindica la exposición a ambientes con riesgo respiratorio.",
+        "Su capacidad respiratoria está muy disminuida y le genera restricción para laborar a ambientes con factores de riesgo respiratorio.": "Se usa en casos de disminución severa o grave con clara limitación funcional."
+      },
+      "registro_cols": "espirometria",
+      "nueva_columna": "espirometria"
+    },
+
+    {
+      "criterios": {
+        "NO REALIZADA.": "Se usa cuando la prueba no fue realizada o se indica que no aplica, independientemente de la variación en la redacción.",
+        "REALIZADA.": "Se asigna cuando se confirma que la audiometría fue realizada.",
+        "Su capacidad auditiva es adecuada para la ocupación.": "Se usa cuando se describe audición normal, adecuada o sin alteración relevante para el trabajo.",
+        "Su capacidad auditiva está disminuida unilateralmente.": "Se usa cuando se describe disminución auditiva en un solo oído, sin indicar imposibilidad total ni bilateralidad.",
+        "Su capacidad auditiva está disminuída y le genera restricciones para exponerse a ruido.": "Se usa cuando se reporta disminución auditiva significativa que implica restricción o precaución para exposición a ruido.",
+        "Su capacidad auditiva está muy deteriorada y no debe exponerse a ruido bajo ninguna circunstancia.": "Se usa cuando la audición está altamente comprometida y requiere evitar totalmente la exposición a ruido.",
+        "Su capacidad auditiva está disminuida, pero puede exponerse a ruido, con el uso permanente de la protección adecuada y el seguimiento necesario.": "Se usa cuando existe disminución auditiva, pero la persona puede exponerse a ruido bajo condiciones estrictas de protección y seguimiento.",
+        "Su capacidad auditiva está disminuida, pero con relación a la Audiometría de Base está estable.": "Se usa cuando hay disminución auditiva pero se mantiene estable respecto a la audiometría de referencia."
+      },
+      "registro_cols": "audiometria",
+      "nueva_columna": "audiometria"
+    },
+
+    {
+      "criterios": {
+        "NO REALIZADA.": "Se clasifica como NO REALIZADA si el texto indica ausencia de prueba, incluyendo variantes como 'no aplica', 'no realizada', con o sin puntos, mayúsculas o duplicaciones.",
+        "REALIZADA.": "Se clasifica como REALIZADA si el texto indica explícitamente realización de la prueba.",
+        "Su capacidad visual actual es adecuada para la ocupación.": "Se usa si el texto expresa que la capacidad visual actual es adecuada o normal para la ocupación.",
+        "Su capacidad visual actual es adecuada, con el uso de la corrección formulada.": "Se usa si el texto indica que la capacidad visual es adecuada gracias a corrección óptica.",
+        "Su capacidad visual actual se encuentra disminuida por pérdida de la visión por un ojo que no es posible mejorar.": "Se usa si se identifica disminución permanente por pérdida visual en un ojo.",
+        "Su capacidad visual actual se encuentra disminuida y requiere corrección óptica.": "Se usa si existe disminución corregible mediante fórmula óptica.",
+        "Su capacidad visual actual se encuentra disminuida y debe actualizar su corrección óptica.": "Se usa cuando el texto indica que debe actualizar fórmula óptica.",
+        "Su capacidad visual actual se encuentra alterada.": "Se usa para alteración general sin clasificación específica.",
+        "Su capacidad visual actual es adecuada con la presencia de una alteración cromática.": "Se usa si existe alteración cromática con visión adecuada.",
+        "Su capacidad visual actual es adecuada, con la presencia de una alteración en percepción de la profundidad.": "Se usa si se menciona alteración de percepción de profundidad.",
+        "Su capacidad visual actual se encuentra disminuida y debe ser evaluada por el Médico Oftalmólogo o Especialista para establecer posibilidad de mejoramiento.": "Se usa cuando requiere evaluación especializada."
+      },
+      "registro_cols": "optometria",
+      "nueva_columna": "optometria"
+    },
+
+    {
+      "criterios": {
+        "Si": "Se clasifica como Si cuando en el numeral 1 del texto se menciona un factor de riesgo de tipo ergonómico.",
+        "No": "Se clasifica como No cuando no se identifica referencia a riesgo ergonómico."
+      },
+      "registro_cols": "obs_antecedocupacional",
+      "nueva_columna": "riesgo_ergonomico"
+    },
+
+    {
+      "criterios": {
+        "Si": "Se clasifica como Si cuando en el numeral 1 del registro se menciona un factor de riesgo de tipo biomecánico.",
+        "No": "Se clasifica como No cuando no se identifica referencia a riesgo biomecánico."
+      },
+      "registro_cols": "obs_antecedocupacional",
+      "nueva_columna": "riesgo_biomecanico"
+    },
+
+    {
+      "criterios": {
+        "Si": "Se clasifica como Si cuando en el numeral 1 del registro se menciona un factor de riesgo psicosocial.",
+        "No": "Se clasifica como No cuando no se identifica referencia a riesgo psicosocial."
+      },
+      "registro_cols": "obs_antecedocupacional",
+      "nueva_columna": "riesgo_psicosocial"
+    },
+
+    {
+      "criterios": {
+        "Si": "Se clasifica como Si cuando en el numeral 1 del registro se menciona un factor de riesgo químico.",
+        "No": "Se clasifica como No cuando no se identifica referencia a riesgo químico."
+      },
+      "registro_cols": "obs_antecedocupacional",
+      "nueva_columna": "riesgo_quimico"
+    }
+  ]
+
+
+
+inf, meta = informe_final(df,
+                          df_datos,ctx,
+                          tareas=tareas,
+                          salida_html=r"C:\Users\EstebanEscuderoPuert\Downloads\Informe pruebas colmedicos\informes\informe_prueba.html",
+                          aplicar_cie10=True,
+                          aplicar_union=True, 
+                          aplicar_unpivot=True, 
+                          aplicar_split=True, 
+                          col_texto_cie10="obs_diagnostico", 
+                          df_union=df_maestro, 
+                          col_df1="obs_diagnostico", 
+                          col_df2="Code", 
+                          columnas_unpivot=columnas, 
+                          col_split="variable", 
+                          sep_split="-", 
+                          nombre_col1="Tipo prueba", 
+                          nombre_col2="Prueba")
 
 # # Ruta del archivo Excel
-# ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\Informe pruebas colmedicos\Prueba_mult_registros.xlsx"
-# df_date = pd.read_excel(ruta_archivos)
+#ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\Informe pruebas colmedicos\Prueba_mult_registros.xlsx"
+#df_date = pd.read_excel(ruta_archivos)
 
 print(meta)
 
@@ -133,8 +294,8 @@ texto_completo = columnas_a_texto(df,"Titulo","Contenido")
 #print(out)
 
 
-with open(r"C:\Users\EstebanEscuderoPuert\Downloads\output_.txt", "w", encoding="utf-8") as f:
-    f.write(texto_completo)
+#with open(r"C:\Users\EstebanEscuderoPuert\Downloads\output_.txt", "w", encoding="utf-8") as f:
+#    f.write(texto_completo)
 
 variable = [{
       "chart_type": "tabla",
