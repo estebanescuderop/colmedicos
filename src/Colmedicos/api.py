@@ -106,7 +106,6 @@ def informe_final(
         print("✔ División de columna aplicada")
 
     df_datos = df_out
-    df_datos.to_excel(r"C:\Users\EstebanEscuderoPuert\Downloads\output_.xlsx", index=False, engine="openpyxl")
     import time, re
 
     t0 = time.perf_counter()
