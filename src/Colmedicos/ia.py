@@ -24,7 +24,7 @@ import plotly.express as px
 from Colmedicos.registry import register
 from Colmedicos.config import OPENAI_API_KEY
 
-API_KEY = "API"
+API_KEY = "API"  # Reemplaza por tu API key de OpenAI  # Reemplaza por tu API key de OpenAI
 instruccion = "Todo lo que no esté entre los signos ++, redactalo exactamente igual, lo que si esté, sigue las instrucciones y lo reemplazas por lo que haya originalmente entre ++, adicionalmente el texto literal quitale caracteres como: *, por nada del mundo modifiques el texto que encuentres entre el caracter numeral: # y saltos de línea innecesarios.\n\n"
 rol = """Eres un médico especialista en Salud Ocupacional en Colombia.
 Generas informes claros, técnicos y coherentes para empresas de todos los sectores económicos.
@@ -261,8 +261,32 @@ T. Para el uso de leyendas se agrega el parámetro legend_col: string | null, se
 en este parametro se debe especificar la columna que se usará para las leyendas en las gráficas. Adicionalmente, si se especifica este parámetro, se debe asegurar que el parámetro show_legend esté configurado en true para que la leyenda sea visible en la gráfica. Por último si se quiere escoger colores por categoría, se debe usar colors_by_category.
    Nota: Si legend_col es especificado, show_legend debe ser true. adicionalmente, sólo se usa en gráficas de barras, gráficas de barras horizontales y en tablas.
 
+I. Te explico como funciona el parámetro extra_measures:
+    - extra_measures: [ { ... }, { ... }, ... ] | null
+    - Si se especifica, permite definir medidas adicionales a calcular y mostrar en la gráfica o tabla.
+    - Cada objeto dentro del arreglo representa una medida adicional con su propia configuración.
+    - Cada medida adicional puede tener los siguientes campos:
+        {"name": "nombre_columna_1",
+        "conditions_all": [],
+        "conditions_any": [],
+        "agg": "sum",
+        "distinct_on": null,
+        "drop_dupes_before_sum": false}
+    - name: Nombre de la columna que representará la medida adicional.
+    - conditions_all: Condiciones que deben cumplirse (AND) para incluir datos en esta medida.
+    - conditions_any: Condiciones alternativas (OR) para incluir datos en esta medida.
+    - agg: Tipo de agregación a aplicar (sum, count, mean, etc.) para esta medida.
+    - distinct_on: Columna(s) para conteo distinto, si aplica.
+    - drop_dupes_before_sum: Indica si se deben eliminar duplicados antes de sumar, si aplica.
+    - La forma de llamarlo será si de forma explicita se pide en la instrucción una o varias medidas adicionales a calcular y mostrar en la gráfica o tabla, con filtros especificos por medida.
+ 
+J. Si de forma explícita se pide ocultar las medidas originales en la gráfica o tabla, se debe usar el parámetro hide_main_measure: true | false | null
+    - Si se especifica true, las medidas originales no se mostrarán en la gráfica o tabla.
+    - Si se especifica false, las medidas originales se mostrarán junto con las medidas adicionales.
+    - Por defecto, si no se especifica, se asume false (mostrar medidas originales).
 
-ESQUEMA DE SALIDA (params)
+
+ ESQUEMA DE SALIDA (params)
  - Devolver exclusivamente los parametros indicados en este esquema, no devolver nada por fuera de esta estructura, no inventes columnas a menos que estén explicitamente indicadas en {COLUMNAS_JSON}.
 {
   "chart_type": "...",
@@ -290,8 +314,9 @@ ESQUEMA DE SALIDA (params)
   "candidates": { "xlabel": [...], "y": [...] }
   "percentage_of": string | null,
   "percentage_colname": string | null
+  "extra_measures": [ { ... }, { ... }, ... ] | null
+  "hide_main_measure": true | false | null
 }
-
 
 Para SINGLE con varias gráficas o BATCH, siempre devolver:
 
@@ -361,7 +386,9 @@ Salida:
   "needs_disambiguation": false,
   "candidates": { "xlabel": [], "y": [] }
   "porcentage_of": null,
-  "percentage_colname": null
+  "percentage_colname": null,
+  "extra_measures": null
+  "hide_main_measure": null
 }
 
 Ejemplo 2:
@@ -673,6 +700,94 @@ def columns_gpt5(criterios, registro):
 
     texto_respuesta = respuesta.choices[0].message.content
     return texto_respuesta
+
+
+clasificador_batch = """
+Eres un clasificador determinista por reglas.
+Tu tarea es asignar UNA salida para cada registro recibido.
+La salida puede ser:
+  a) Una de las etiquetas definidas en los CRITERIOS (modo clasificación), o
+  b) Un valor numérico o de texto calculado según una regla (modo cálculo).
+
+Formato de entrada:
+  - Regitros: Recibe una estructura de registros de la siguiente forma:
+  {"Registros": [{"idx": 1, "registro": { ... }}, {"idx": 2, "registro": { ... }}, ...]}
+  - Criterios: Recibe una estructura de criterios de la siguiente forma:
+  {"Criterios": { "etiqueta1": "regla o cálculo", "etiqueta2": "regla o cálculo", ... }}
+REGLAS GENERALES
+1) Recibirás:
+   - CRITERIOS: diccionario cuyas claves pueden ser etiquetas o nombres de cálculos.
+   - REGISTROS: lista de objetos {id, registro}.
+
+2) Para cada registro:
+   a) Si el valor asociado a la clave del criterio describe una condición (“se clasifica si…”),
+      aplica las reglas literalmente, tal como en un clasificador determinista:
+        - AND / Y → todas deben cumplirse
+        - OR / O → al menos una
+        - NOT / NO → negación
+        - Comparación de texto: contiene, empieza, termina, igual
+        - Comparaciones numéricas o fechas (si vienen normalizadas)
+      Si se cumplen varias, gana el PRIMER criterio.
+
+   b) Si el texto del criterio describe una instrucción de CÁLCULO
+      (“Calculo: …”, “Calcular …”, “Obtener …”, etc.):
+        - Debes ejecutar el cálculo EXACTAMENTE con los valores del registro.
+        - Ejemplos válidos:
+            “Calculo los años = fecha_hoy - fecha_ingreso en años”
+            “Calculo IMC = peso / (talla * talla)”
+            “Calculo antigüedad = fecha_actual - fecha_inicio en años”
+        - La salida puede ser un número entero, decimal o un string limpio.
+        - No agregues texto adicional.
+
+   c) Si ningún criterio aplica, usa:
+        - el último criterio explícito que sea “resto/caso por defecto”, o
+        - si no existe, la ÚLTIMA clave del diccionario.
+   d) La salida para cada registro es UN SOLO valor: la etiqueta o el resultado del cálculo.
+   e) Para los cálculos, si hay error (división por cero, dato faltante, formato inválido), devuelve "0".
+   f) Para los cálculos puedes realizar cualquier tipo de operación matemática básica (+, -, *, /), uso de paréntesis, y funciones comunes (redondeo, truncar, fechas, etc.).
+
+3) NO OMITAS REGISTROS.
+4) NO CAMBIES EL ORDEN DE LOS REGISTROS.
+5) NO AGREGUES EXPLICACIONES NI COMENTARIOS.
+6) Para cada registro debes generar exactamente UN Valor (ya sea etiqueta o cálculo), usando las reglas.
+7) No debes omitir ningún registro, bajo ninguna circunstancia.
+8) No debes reorganizar los registros, la salida debe respetar el orden de entrada.
+
+FORMATO DE RESPUESTA:
+[
+  {"id": <id_registro>, "etiqueta": <valor>},
+  ...
+]
+
+Eres estricto, literal y consistente.
+
+Con base en los siguientes criterios:
+{Criterios}
+
+Y la siguiente lista de registros:
+{Registros}
+
+devuelve únicamente el JSON con las salidas procesadas.
+"""
+
+@register("columns_batch_gpt5")
+def columns_batch_gpt5(criterios, registros):
+    """Envía un prompt y devuelve la respuesta de GPT-5."""
+    time.sleep(1)
+    respuesta = client.chat.completions.create(
+        model="gpt-4.1-mini",  # 👈 Aquí usas GPT-5 directamente
+        messages=[
+            {"role": "system", "content": "Eres un asistente preciso y coherente con instrucciones de análisis de texto, especificamente hablando de temas relacionados con salud ocupacional."},
+            {"role": "user", "content": clasificador_batch.replace("{Criterios}", str(criterios['Criterios'])).replace("{Registros}", str(registros['Registros']))}
+        ]
+    )
+
+    texto_respuesta = respuesta.choices[0].message.content
+    params = json.loads(texto_respuesta)
+    return params
+
+
+
 
 
 

@@ -106,7 +106,7 @@ def informe_final(
         print("✔ División de columna aplicada")
 
     df_datos = df_out
-
+    df_datos.to_excel(r"C:\Users\EstebanEscuderoPuert\Downloads\output_.xlsx", index=False, engine="openpyxl")
     import time, re
 
     t0 = time.perf_counter()
@@ -155,7 +155,6 @@ def informe_final(
             text_for_next = out_ia
         else:
             logs.append("Análisis IA: SKIP (sin tokens)")
-            text_for_next = out_ia
             # text_for_next se mantiene
                 # 3.5) Portada y tabla de contenido opcional
 

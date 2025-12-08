@@ -17,7 +17,7 @@ from matplotlib._pylab_helpers import Gcf
 
 # --- Project-local ---
 from Colmedicos.registry import register
-from Colmedicos.ia import operaciones_gpt5, graficos_gpt5, columns_gpt5, ask_gpt5
+from Colmedicos.ia import operaciones_gpt5, graficos_gpt5, columns_gpt5, ask_gpt5,columns_batch_gpt5
 from Colmedicos.math_ops import ejecutar_operaciones_condicionales
 from Colmedicos.charts import plot_from_params
 
@@ -683,44 +683,26 @@ def process_plot_blocks(df: pd.DataFrame, texto: str):
 
     return texto_reemplazado
 
-
-# ----------------------------
-# 6) Función que calcula columnas.
-# ----------------------------
-
 def aplicar_multiples_columnas_gpt5(
     df: pd.DataFrame,
     tareas: List[Dict[str, Any]],
     *,
     replace_existing: bool = True,
+    chunk_size: int = 200,
+    debug: bool = False
 ) -> pd.DataFrame:
-    """
-    Procesa múltiples columnas nuevas usando IA.
-
-    Si 'tareas' está vacío → devuelve df.
-    Permite reemplazar columnas existentes si replace_existing=True.
-
-    Cada tarea debe incluir:
-      - 'criterios'
-      - 'registro_cols'
-      - 'nueva_columna'
-      - opcional: 'fn_ia'
-      - opcional: 'on_error'
-    """
 
     import json
+    import math
 
-    # -------------------------------------
-    # 🟢 Si no hay tareas, devolver el df intacto
-    # -------------------------------------
     if not tareas:
         return df
 
-    out = df.copy()
+    df_out = df.copy()
 
-    # --------------------------
-    # Helpers compartidos
-    # --------------------------
+    # -------------------------
+    # Helpers
+    # -------------------------
     def _parse_val(val):
         if isinstance(val, dict):
             return val
@@ -729,7 +711,7 @@ def aplicar_multiples_columnas_gpt5(
                 j = json.loads(val)
                 if isinstance(j, dict):
                     return j
-            except Exception:
+            except:
                 pass
         return {"valor": val}
 
@@ -738,59 +720,324 @@ def aplicar_multiples_columnas_gpt5(
             return _parse_val(row[cols_list[0]])
         return {c: row[c] for c in cols_list}
 
-    def _key(reg):
-        try:
-            return json.dumps(reg, ensure_ascii=False, sort_keys=True)
-        except Exception:
-            return str(reg)
-
-    # -----------------------------------------
+    # -------------------------
     # Procesar cada tarea
-    # -----------------------------------------
+    # -------------------------
     for tarea in tareas:
 
         criterios      = tarea["criterios"]
         registro_cols  = tarea["registro_cols"]
-        nueva_columna  = tarea["nueva_columna"]
+        nueva_col      = tarea["nueva_columna"]
 
-        fn_ia    = tarea.get("fn_ia", columns_gpt5)
+        fn_ia    = tarea.get("fn_ia", columns_batch_gpt5)
         on_error = tarea.get("on_error", None)
 
-        # Normalizar input
         cols_list = [registro_cols] if isinstance(registro_cols, str) else list(registro_cols)
 
-        # Cache por tarea
-        cache = {}
+        if (not replace_existing) and (nueva_col in df_out.columns):
+            raise ValueError(f"La columna '{nueva_col}' ya existe.")
 
-        def clasificar_row(row):
-            reg = _build_registro(row, cols_list)
-            k = _key(reg)
+        df_out[nueva_col] = None
 
-            if k in cache:
-                return cache[k]
+        total_rows = len(df_out)
+        n_chunks = math.ceil(total_rows / chunk_size)
 
+        for i in range(n_chunks):
+
+            start = i * chunk_size
+            end   = min(start + chunk_size, total_rows)
+            df_chunk = df_out.iloc[start:end]
+
+            registros = []
+            for idx_df, row in df_chunk.iterrows():
+                registros.append({
+                    "idx": int(idx_df),
+                    "registro": _build_registro(row, cols_list)
+                })
+
+            # Llamado IA
             try:
-                etiqueta = fn_ia({"Criterios": criterios}, {"Registro": reg})
-                if isinstance(etiqueta, str):
-                    etiqueta = etiqueta.strip()
-            except Exception:
-                etiqueta = on_error
+                respuesta = fn_ia({"Criterios": criterios}, {"Registros": registros})
+            except Exception as e:
+                if debug:
+                    print("ERROR IA:", e)
+                for r in registros:
+                    df_out.at[r["idx"], nueva_col] = on_error
+                continue
 
-            cache[k] = etiqueta
-            return etiqueta
+            if debug:
+                print("RESPUESTA IA:", respuesta)
 
-        # ---------------------------------------------------------
-        # 🟦 Crear o reemplazar la columna según replace_existing
-        # ---------------------------------------------------------
-        if (not replace_existing) and (nueva_columna in out.columns):
-            raise ValueError(
-                f"La columna '{nueva_columna}' ya existe. "
-                f"Activa replace_existing=True para reemplazarla."
-            )
+            # Normalizar respuesta
+            resultados = None
 
-        out[nueva_columna] = out.apply(clasificar_row, axis=1)
+            # Caso A → {"resultados": [...]}
+            if isinstance(respuesta, dict) and "resultados" in respuesta:
+                resultados = respuesta["resultados"]
 
-    return out
+            # Caso B → lista de items
+            elif isinstance(respuesta, list):
+                resultados = respuesta
+
+            # fallback
+            if resultados is None:
+                for r in registros:
+                    df_out.at[r["idx"], nueva_col] = on_error
+                continue
+
+            # Mapear cada resultado
+            for item in resultados:
+
+                idx = item.get("idx", item.get("id"))
+                etiqueta = item.get("resultado", item.get("etiqueta", on_error))
+
+                if idx in df_out.index:
+                    df_out.at[idx, nueva_col] = etiqueta
+
+    return df_out
+
+
+# def aplicar_multiples_columnas_gpt5(
+#     df: pd.DataFrame,
+#     tareas: List[Dict[str, Any]],
+#     *,
+#     replace_existing: bool = True,
+# ) -> pd.DataFrame:
+#     """
+#     Procesa múltiples columnas nuevas usando GPT en modo batch.
+#     Para cada tarea:
+#       - toma los registros del DF,
+#       - arma un batch JSON con IDs secuenciales,
+#       - llama a columns_batch_gpt5(),
+#       - recibe un array con {"id": "...", "etiqueta": "..."},
+#       - reconstruye la columna en el DF.
+
+#     Mantiene la lógica original, pero optimizando costos y velocidad.
+#     """
+
+#     import json
+
+#     # Si no hay tareas → devolver igual
+#     if not tareas:
+#         return df
+
+#     # Trabajamos sobre una copia
+#     out = df.copy()
+
+#     # =====================================================
+#     # Helpers compatibles con tu flujo original
+#     # =====================================================
+
+#     def _parse_val(val):
+#         """Normaliza valores: si es JSON lo convierte en dict."""
+#         if isinstance(val, dict):
+#             return val
+#         if isinstance(val, str) and val.strip().startswith("{"):
+#             try:
+#                 j = json.loads(val)
+#                 if isinstance(j, dict):
+#                     return j
+#             except Exception:
+#                 pass
+#         return {"valor": val}
+
+#     def _build_registro(row, cols_list):
+#         """Construye un registro compatible con el clasificador."""
+#         if len(cols_list) == 1:
+#             return _parse_val(row[cols_list[0]])
+#         return {c: row[c] for c in cols_list}
+
+#     # =====================================================
+#     # Procesar cada tarea de clasificación
+#     # =====================================================
+#     for tarea in tareas:
+
+#         criterios      = tarea["criterios"]        # texto plano
+#         registro_cols  = tarea["registro_cols"]
+#         nueva_columna  = tarea["nueva_columna"]
+
+#         fn_ia    = tarea.get("fn_ia", columns_batch_gpt5)
+#         on_error = tarea.get("on_error", None)
+
+#         # Convertir registro_cols a lista
+#         cols_list = [registro_cols] if isinstance(registro_cols, str) else list(registro_cols)
+
+#         # Reindex temporalmente a 0..N-1 para que coincidan los IDs
+#         out = out.reset_index(drop=True)
+
+#         # =====================================================
+#         # Construir el batch de registros a enviar a la IA
+#         # =====================================================
+#         registros_batch = []
+
+#         for i in range(len(out)):
+#             reg = _build_registro(out.loc[i], cols_list)
+#             registros_batch.append({
+#                 "id": str(i),     # El batch trabaja con string IDs, consistente con tu prompt
+#                 "registro": reg
+#             })
+
+#         # Estructura enviada al modelo
+#         payload = {
+#             "Criterios": criterios,
+#             "Registros": registros_batch,
+#         }
+
+#         # =====================================================
+#         # Llamada real a la IA en batch
+#         # =====================================================
+#         try:
+#             resultados = fn_ia(payload, payload)   # tu función espera (criterios, registros) aunque sean el mismo dict
+#         except Exception:
+#             # Si falló el batch → llenar con on_error
+#             out[nueva_columna] = on_error
+#             continue
+
+#         # =====================================================
+#         # Normalizar la respuesta del modelo
+#         # =====================================================
+#         mapa = {}   # id → etiqueta
+
+#         if isinstance(resultados, list):
+#             for item in resultados:
+#                 if not isinstance(item, dict):
+#                     continue
+
+#                 idx = str(item.get("id"))
+#                 etiqueta = item.get("etiqueta")
+
+#                 if idx is not None:
+#                     mapa[idx] = etiqueta
+#         else:
+#             # Caso inesperado: respuesta no es lista
+#             out[nueva_columna] = on_error
+#             continue
+
+#         # =====================================================
+#         # Construir la nueva columna con los resultados
+#         # =====================================================
+#         nueva_series = []
+
+#         for i in range(len(out)):
+#             key = str(i)
+#             nueva_series.append(mapa.get(key, on_error))
+
+#         # Validar reemplazo
+#         if (not replace_existing) and (nueva_columna in out.columns):
+#             raise ValueError(
+#                 f"La columna '{nueva_columna}' ya existe. "
+#                 f"Activa replace_existing=True para reemplazarla."
+#             )
+
+#         out[nueva_columna] = nueva_series
+
+#     # Retornar DF final
+#     return out
+
+
+# def aplicar_multiples_columnas_gpt5(
+#     df: pd.DataFrame,
+#     tareas: List[Dict[str, Any]],
+#     *,
+#     replace_existing: bool = True,
+# ) -> pd.DataFrame:
+#     """
+#     Procesa múltiples columnas nuevas usando IA.
+
+#     Si 'tareas' está vacío → devuelve df.
+#     Permite reemplazar columnas existentes si replace_existing=True.
+
+#     Cada tarea debe incluir:
+#       - 'criterios'
+#       - 'registro_cols'
+#       - 'nueva_columna'
+#       - opcional: 'fn_ia'
+#       - opcional: 'on_error'
+#     """
+
+#     import json
+
+#     # -------------------------------------
+#     # 🟢 Si no hay tareas, devolver el df intacto
+#     # -------------------------------------
+#     if not tareas:
+#         return df
+
+#     out = df.copy()
+
+#     # --------------------------
+#     # Helpers compartidos
+#     # --------------------------
+#     def _parse_val(val):
+#         if isinstance(val, dict):
+#             return val
+#         if isinstance(val, str) and val.strip().startswith("{"):
+#             try:
+#                 j = json.loads(val)
+#                 if isinstance(j, dict):
+#                     return j
+#             except Exception:
+#                 pass
+#         return {"valor": val}
+
+#     def _build_registro(row, cols_list):
+#         if len(cols_list) == 1:
+#             return _parse_val(row[cols_list[0]])
+#         return {c: row[c] for c in cols_list}
+
+#     def _key(reg):
+#         try:
+#             return json.dumps(reg, ensure_ascii=False, sort_keys=True)
+#         except Exception:
+#             return str(reg)
+
+#     # -----------------------------------------
+#     # Procesar cada tarea
+#     # -----------------------------------------
+#     for tarea in tareas:
+
+#         criterios      = tarea["criterios"]
+#         registro_cols  = tarea["registro_cols"]
+#         nueva_columna  = tarea["nueva_columna"]
+
+#         fn_ia    = tarea.get("fn_ia", columns_gpt5)
+#         on_error = tarea.get("on_error", None)
+
+#         # Normalizar input
+#         cols_list = [registro_cols] if isinstance(registro_cols, str) else list(registro_cols)
+
+#         # Cache por tarea
+#         cache = {}
+
+#         def clasificar_row(row):
+#             reg = _build_registro(row, cols_list)
+#             k = _key(reg)
+
+#             if k in cache:
+#                 return cache[k]
+
+#             try:
+#                 etiqueta = fn_ia({"Criterios": criterios}, {"Registro": reg})
+#                 if isinstance(etiqueta, str):
+#                     etiqueta = etiqueta.strip()
+#             except Exception:
+#                 etiqueta = on_error
+
+#             cache[k] = etiqueta
+#             return etiqueta
+
+#         # ---------------------------------------------------------
+#         # 🟦 Crear o reemplazar la columna según replace_existing
+#         # ---------------------------------------------------------
+#         if (not replace_existing) and (nueva_columna in out.columns):
+#             raise ValueError(
+#                 f"La columna '{nueva_columna}' ya existe. "
+#                 f"Activa replace_existing=True para reemplazarla."
+#             )
+
+#         out[nueva_columna] = out.apply(clasificar_row, axis=1)
+
+#     return out
 
 # ----------------------------
 # 7) Exportar a HTML con saltos de página y data URIs.

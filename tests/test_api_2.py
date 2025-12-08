@@ -1,14 +1,14 @@
 
 from Colmedicos.io_utils_remaster import process_ia_blocks, process_data_blocks, process_plot_blocks, _render_vars_text, parse_plot_blocks, parse_ia_blocks, parse_data_blocks, exportar_output_a_html, _fig_to_data_uri, _format_result_plain, columnas_a_texto, unir_idx_params_con_span_json, aplicar_multiples_columnas_gpt5, unpivot_df, dividir_columna_en_dos, procesar_codigos_cie10, unir_dataframes, unir_idx_params_con_span_json_data,expand_json_column
 import pandas as pd
-from Colmedicos.ia import ask_gpt5, operaciones_gpt5, graficos_gpt5,portada_gpt5
+from Colmedicos.ia import ask_gpt5, operaciones_gpt5, graficos_gpt5,portada_gpt5, columns_batch_gpt5
 from Colmedicos.io_utils import aplicar_plot_por_tipo_desde_output, aplicar_ia_por_tipo, generar_output, mostrar_html
 from Colmedicos.charts import plot_from_params
 from Colmedicos.math_ops import ejecutar_operaciones_condicionales
 from Colmedicos.api import informe_final
 
 
-
+otra_ruta = r"C:\Users\EstebanEscuderoPuert\Downloads\muestra_plantilla.xlsx"
 # Ruta del archivo Excel
 ruta_archivo = r"C:\Users\EstebanEscuderoPuert\Downloads\Plantilla.xlsx"
 # Lee el archivo Excel (por defecto lee la primera hoja)
@@ -22,7 +22,7 @@ ctx = {
     "numero_personas": 51,
 }
 
-otra_ruta = r"C:\Users\EstebanEscuderoPuert\Downloads\Muestreo 10 informes.xlsx"
+
 # Ruta del archivo Excel
 ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\MatrizInformesDx - TCC (1).xlsx"
 df_datos = pd.read_excel(ruta_archivos)
@@ -237,12 +237,28 @@ tareas = [
     },    
     {
       "criterios": {
-       "Se calcula la diferencia de años entre la fecha actual y la fecha del examen para obtener la antiguedad": "Se usa para calcular la edad en años a partir de la fecha la evaluación médica ocupacional y la fecha de nacimiento del trabajador."
+       "antiguedad": "Calculo: años_antiguedad = fecha_hoy - fecha_ingreso en años."
         },
-      "registro_cols": "fecha",
+      "registro_cols": "fecha_ingreso",
       "nueva_columna": "antiguedad"
+    },
+    {"criterios": {
+        "AUXILIAR": "Se usa si el cargo del trabajador es AUXILIAR o similares",
+        "OPERARIO": "Se usa si el cargo del trabajador es OPERARIO o similares",
+        "ADMINISTRATIVO": "Se usa si el cargo del trabajador es ADMINISTRATIVO o similares",
+        "INGENIERO": "Se usa si el cargo del trabajador es INGENIERO o similares",
+        "TECNICO": "Se usa si el cargo del trabajador es TECNICO o similares",
+        "ANALISTA": "Se usa si el cargo del trabajador es ANALISTA o similares",
+        "VENDEDOR": "Se usa si el cargo del trabajador es VENDEDOR o similares",
+        "COORDINADOR": "Se usa si el cargo del trabajador es COORDINADOR o similares",
+        "GERENTE": "Se usa si el cargo del trabajador es GERENTE o similares",
+        "PUBLICISTA": "Se usa si el cargo del trabajador es PUBLICISTA o similares",
+        "OTRO": "Se usa para todos los demás cargos no clasificados en las categorías anteriores" 
+    },
+      "registro_cols": "ocupacion",
+      "nueva_columna": "categoria_cargo"
     }
-  ]
+    ]
 
 campos = ["lab_grupo", "lab_item_unificado", "lab_Resultado_global"]
 renombres = {
@@ -269,20 +285,39 @@ inf, meta = informe_final(df,
 
 
 
-# # # Ruta del archivo Excel
-# # ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\Informe pruebas colmedicos\Prueba_mult_registros.xlsx"
-# # df_date = pd.read_excel(ruta_archivos)
+# # # # Ruta del archivo Excel
+# ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\Informe pruebas colmedicos\Prueba_mult_registros.xlsx"
+# df_date = pd.read_excel(ruta_archivos)
 
 print(meta)
 
 
-#out = aplicar_multiples_columnas_gpt5(df_date, tareas)
+# out = aplicar_multiples_columnas_gpt5(df_date, tareas)
 
 # criterios = {
 #     "No caso": "Se usa si trabajadores que no presentan síntomas ni hallazgos clínicos compatibles con desórdenes musculoesqueléticos en el momento de la evaluación",
 #     "Sintomático": "Se usa si trabajadores que refieren molestias musculoesqueléticas (como dolor, rigidez o fatiga muscular), pero sin evidencia clínica o funcional suficiente para confirmar un diagnostico ocupacional.",
 #     "Caso confirmado": "Se usa si trabajadores que presentan síntomas persistentes acompañados de hallazgos físicos, antecedentes y pruebas clínicas"
 # }
+# registros = {
+#   "Registros": [
+#     { "idx": 0, "registro": { "habitos_tabaquismo1": "No Fuma" }},
+#     { "idx": 1, "registro": { "habitos_tabaquismo1": "No Fuma" }},
+#     { "idx": 2, "registro": { "habitos_tabaquismo1": "No Fuma" }},
+#     { "idx": 3, "registro": { "habitos_tabaquismo1": "No Fuma" }},
+#     { "idx": 4, "registro": { "habitos_tabaquismo1": "Fumador" }}
+#   ]
+# }
+
+# tarea_u = {
+#   "Criterios": {
+#     "No": "Se usa si es un exfumador, está vacío o manifiesta que no fuma",
+#     "Si": "Se usa si manifiesta que fuma"
+#   }
+# }
+
+# valores = columns_batch_gpt5(criterios=tarea_u, registros=registros)
+# print(valores)
 
 # ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\MatrizInformesDx - TCC (1).xlsx"
 # df_otro = pd.read_excel(ruta_archivos)
@@ -350,14 +385,14 @@ print(meta)
 #out = texto_completo + "\n\n" + out
 
 
-# out = graficos_gpt5(df_dato,textico)
+# out = graficos_gpt5(df_otro,texto_completo)
 # print(out)
 # import json
 # config_list = json.loads(out)
 # params = config_list[0]["params"]
-# fig, ax = plot_from_params(df_dato,params)
+# fig, ax = plot_from_params(df_otro,params)
 # out = _fig_to_data_uri(fig)
-# print(out)
+# #print(out)
 
 
 # with open(r"C:\Users\EstebanEscuderoPuert\Downloads\output_.txt", "w", encoding="utf-8") as f:

@@ -288,17 +288,58 @@ def _aggregate_frame(
     out = pd.concat(frames, axis=1)
     return out
 
-def _annotate_bars(ax: plt.Axes, fmt: str = "{:,.0f}"):
-    for p in ax.patches:
-        if not hasattr(p, "get_height"):
-            continue
-        val = p.get_height() if p.get_height() != 0 else p.get_width()
-        if np.isnan(val):
-            continue
-        x = p.get_x() + p.get_width()/2
-        y = p.get_y() + p.get_height()
-        ax.annotate(fmt.format(val), (x, y), ha="center", va="bottom", fontsize=9, rotation=0)
+def _apply_top_n_general(df: pd.DataFrame, label_col: str, top_n: int) -> pd.DataFrame:
+    """
+    Aplica Top-N + 'Otros' de forma generalizada para:
+      - tablas simples (1 métrica)
+      - tablas pivoteadas (múltiples métricas)
+      - gráficos de barras / torta
 
+    df: DataFrame donde una columna es la etiqueta (label_col)
+        y las demás columnas son valores numéricos.
+    """
+    # Identificar columnas de valores
+    value_cols = [c for c in df.columns if c != label_col]
+
+    # Si solo hay una columna de valores, usarla directamente
+    if len(value_cols) == 1:
+        value_col = value_cols[0]
+        df_sorted = df.sort_values(value_col, ascending=False)
+
+        if len(df_sorted) <= top_n:
+            return df_sorted
+
+        top_df = df_sorted.head(top_n)
+        others_df = df_sorted.iloc[top_n:]
+
+        others_value = pd.to_numeric(
+            others_df[value_col], errors="coerce"
+        ).fillna(0).sum()
+
+        others_row = {label_col: "Otros", value_col: others_value}
+        return pd.concat([top_df, pd.DataFrame([others_row])], ignore_index=True)
+
+    # Si hay múltiples columnas (caso pivot), sumar para ordenar
+    df["_row_total"] = df[value_cols].apply(
+        lambda r: pd.to_numeric(r, errors="coerce").fillna(0).sum(), axis=1
+    )
+    df_sorted = df.sort_values("_row_total", ascending=False)
+
+    if len(df_sorted) <= top_n:
+        return df_sorted.drop(columns=["_row_total"])
+
+    top_df = df_sorted.head(top_n).drop(columns=["_row_total"])
+    others_df = df_sorted.iloc[top_n:]
+
+    # Crear fila de agregación 'Otros'
+    others_row = {label_col: "Otros"}
+    for col in value_cols:
+        others_row[col] = pd.to_numeric(
+            others_df[col], errors="coerce"
+        ).fillna(0).sum()
+
+    top_df = pd.concat([top_df, pd.DataFrame([others_row])], ignore_index=True)
+    return top_df
 
 # ===========================
 # Gráficas
@@ -395,8 +436,25 @@ def graficar_barras(
         drop_dupes_before_sum=drop_dupes_before_sum,
     )
 
-    if isinstance(df_plot, pd.Series):
-        df_plot = df_plot.to_frame(name=value_col or "valor")
+    # === TOP-N + Otros (solo sobre df_plot, antes de ordenar/limitar) ===
+    if limit_categories and limit_categories > 0:
+        label_col = df_plot.index.names[0] if isinstance(df_plot.index, pd.MultiIndex) else None
+
+        # Si el índice es simple, convertirlo a columna
+        if not label_col:
+            df_plot = df_plot.reset_index()
+            label_col = df_plot.columns[0]
+
+        else:
+            # MultiIndex → solo aplicamos si legend_col NO está activo
+            # (Si legend_col está activo, el pivot lo maneja la función más adelante)
+            df_plot = df_plot.reset_index()
+
+        df_plot = _apply_top_n_general(df_plot, label_col, limit_categories)
+
+        # Asegurar formato DataFrame
+        if isinstance(df_plot, pd.Series):
+            df_plot = df_plot.to_frame(name=value_col or "valor")
 
     # =====================================================
     # MODO 1: SIN LEYENDA (comportamiento clásico)
@@ -510,7 +568,7 @@ def graficar_barras(
         if isinstance(color, str):
             return color
         palette = ["#1A4F80", "#1a9422", "#e0830a", "#eff312",
-                   '#8e44ad', '#16a085', '#c0392b', '#7f8c8d']
+                '#8e44ad', '#16a085', '#c0392b', '#7f8c8d']
         return palette[idx % len(palette)]
 
     for i, serie in enumerate(legend_values):
@@ -563,7 +621,7 @@ def graficar_barras(
 
     if show_legend:
         ax.legend(loc='upper right', framealpha=0.95,
-                  edgecolor='#bdc3c7', fontsize=10, title=legend_col)
+                edgecolor='#bdc3c7', fontsize=10, title=legend_col)
     else:
         leg = ax.get_legend()
         if leg:
@@ -571,128 +629,6 @@ def graficar_barras(
 
     fig.tight_layout()
     return fig, ax
-
-    # =====================================================
-    # MODO 2: CON LEYENDA (múltiples series agrupadas)
-    # =====================================================
-
-    # En este punto, el índice es MultiIndex: [xlabel, legend_col]
-    if not isinstance(df_plot.index, pd.MultiIndex):
-        raise ValueError("Se esperaba un índice MultiIndex al usar 'legend_col'.")
-
-    # Usamos solo la columna de valores
-    val_col = df_plot.columns[0]
-    # Pivot: filas = categorías X, columnas = categorías de leyenda
-    df_wide = df_plot[val_col].unstack(level=-1)
-
-    # Sort opcional: por suma de filas o por label
-    if sort:
-        by = sort.get("by", "y")
-        order = sort.get("order", "desc")
-        ascending = (order == "asc")
-
-        if by == "label":
-            df_wide = df_wide.sort_index(ascending=ascending)
-        else:
-            row_metric = df_wide.sum(axis=1)
-            df_wide = df_wide.loc[row_metric.sort_values(ascending=ascending).index]
-
-    # Top-N opcional
-    if limit_categories and limit_categories > 0:
-        df_wide = df_wide.head(limit_categories)
-
-    # --------------------------------------------
-    # Construir figura agrupada por leyenda
-    # --------------------------------------------
-    fig, ax = plt.subplots(figsize=(12, 7), facecolor='white')
-    ax.set_facecolor('#f8f9fa')
-
-    x_labels = df_wide.index.astype(str).tolist()
-    legend_values = df_wide.columns.tolist()
-    n_series = len(legend_values)
-    x = np.arange(len(x_labels))
-
-    # ancho de cada barra
-    width = 0.8 / max(n_series, 1)
-
-    # Paleta de colores por serie
-    def _color_for_series(name, idx):
-        # prioridad: colors_by_category > lista color > un solo color base > paleta default
-        if colors_by_category and name in colors_by_category:
-            return colors_by_category[name]
-        if isinstance(color, list) and len(color) > idx:
-            return color[idx]
-        if isinstance(color, str):
-            return color
-        # paleta por defecto
-        base_palette = ['#5A6C7D', '#0e4a8f', '#58b12e', '#f39c12',
-                        '#8e44ad', '#16a085', '#c0392b', '#7f8c8d']
-        return base_palette[idx % len(base_palette)]
-
-    bars_containers = []
-
-    for i, serie in enumerate(legend_values):
-        serie_vals = df_wide[serie].values
-        offset = (i - (n_series - 1) / 2) * width
-        c = _color_for_series(str(serie), i)
-
-        bars = ax.bar(
-            x + offset,
-            serie_vals,
-            width=width,
-            label=str(serie),
-            color=c,
-            edgecolor='white',
-            linewidth=1.2,
-            alpha=0.9
-        )
-        bars_containers.append(bars)
-
-        # Valores sobre las barras de cada serie (opcional)
-        if show_values:
-            for bar in bars:
-                v = bar.get_height()
-                if pd.isna(v):
-                    continue
-                formatted_val = f"{v:,.0f}" if v >= 1 else f"{v:.2f}"
-                ax.text(
-                    bar.get_x() + bar.get_width() / 2,
-                    v,
-                    formatted_val,
-                    ha="center",
-                    va="bottom",
-                    fontsize=9,
-                    fontweight='600',
-                    color='#2c3e50'
-                )
-
-    # Ejes y estilo
-    ax.set_xticks(x)
-    ax.set_xticklabels(x_labels, rotation=45, ha="right", fontsize=9, color='#34495e')
-    ax.tick_params(axis="y", labelsize=9, colors='#34495e')
-
-    if titulo:
-        ax.set_title(titulo, fontsize=16, fontweight='bold', pad=20, color="#000000")
-    ax.set_ylabel(val_col, fontsize=11, fontweight='600', color='#34495e')
-    ax.set_xlabel(xlabel_final if xlabel_final else '', fontsize=11, fontweight='600', color='#34495e')
-
-    ax.grid(axis="y", linestyle="--", alpha=0.3, color='#bdc3c7', zorder=0)
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.spines['left'].set_color('#bdc3c7')
-    ax.spines['bottom'].set_color('#bdc3c7')
-
-    # Leyenda
-    if show_legend:
-        ax.legend(loc='upper right', framealpha=0.95, edgecolor='#bdc3c7', fontsize=10, title=legend_col)
-    else:
-        leg = ax.get_legend()
-        if leg:
-            leg.remove()
-
-    fig.tight_layout()
-    return fig, ax
-
 
 def graficar_torta(
     df: pd.DataFrame,
@@ -721,14 +657,16 @@ def graficar_torta(
     if y is None:
         num_cols = df2.select_dtypes(include=[np.number]).columns.tolist()
         if not num_cols and not (distinct_on and agg in ("count", "distinct_count")):
-            raise ValueError("No se encontraron columnas numéricas ni 'distinct_on' para contar.")
+            raise ValueError("No se encontraron columnas numéricas ni 'distinct_on'.")
         y_cols = [num_cols[0]] if num_cols else []
     else:
         if y not in df2.columns:
             raise ValueError(f"La columna '{y}' no existe en el DataFrame.")
         y_cols = [y]
 
-    # Filtro + deduplicación previa
+    col_val = y_cols[0] if y_cols else None
+
+    # --- Filtro + deduplicación previa ---
     dff = _prefilter_df(
         df2,
         unique_by=unique_by,
@@ -736,7 +674,7 @@ def graficar_torta(
         conditions_any=conditions_any,
     )
 
-    # Agregar
+    # --- Agregación única ---
     df_plot = _aggregate_frame(
         dff,
         xlabel=xlabel_final,
@@ -746,62 +684,84 @@ def graficar_torta(
         drop_dupes_before_sum=drop_dupes_before_sum,
     )
 
-    # --- Normalizar a DataFrame ---
+    # Normalizar a DataFrame con columna de etiqueta + valores
     if isinstance(df_plot, pd.Series):
-        df_plot = df_plot.to_frame(name="valor")
-
-    if df_plot.shape[1] != 1:
-        raise ValueError("El gráfico de torta requiere una única serie numérica después de agregar.")
+        df_plot = df_plot.to_frame(name=col_val or "valor")
 
     df_plot = df_plot.reset_index()
-
-    col_val = df_plot.columns[-1]
     col_lab = df_plot.columns[0]
+    col_val = df_plot.columns[-1]
 
-    serie = df_plot[col_val].replace([np.inf, -np.inf], np.nan).dropna()
-    etiquetas = df_plot.loc[serie.index, col_lab].astype(str)
+    # ------------------------------
+    # TOP-N + Otros (antes del sort)
+    # ------------------------------
+    if limit_categories and limit_categories > 0:
+        df_plot = _apply_top_n_general(df_plot, col_lab, limit_categories)
+
+    # ------------------------------
+    # Eliminar NaN/inf y filtrar
+    # ------------------------------
+    serie = pd.to_numeric(df_plot[col_val], errors="coerce").replace([np.inf, -np.inf], np.nan)
+    etiquetas = df_plot[col_lab].astype(str)
+
+    # Quitamos filas inválidas
+    valid = serie.notna()
+    serie = serie[valid]
+    etiquetas = etiquetas[valid]
 
     if serie.empty:
-        raise ValueError("No hay datos válidos para graficar (todo es NaN/inf o vacío).")
+        raise ValueError("No hay datos válidos para graficar la torta.")
 
-    # sort / top-N
+    # ------------------------------
+    # sort opcional
+    # ------------------------------
     if sort:
         by = sort.get("by", "y")
-        order = sort.get("order", "desc")
-        ascending = (order == "asc")
-        if by == "label":
-            orden_idx = etiquetas.sort_values(ascending=ascending).index
-        else:
-            orden_idx = serie.sort_values(ascending=ascending).index
-        serie = serie.loc[orden_idx]
-        etiquetas = etiquetas.loc[orden_idx]
+        asc = sort.get("order", "desc") == "asc"
 
+        if by == "label":
+            orden = etiquetas.sort_values(ascending=asc).index
+        else:
+            orden = serie.sort_values(ascending=asc).index
+
+        serie = serie.loc[orden]
+        etiquetas = etiquetas.loc[orden]
+
+    # ------------------------------
+    # Aplicar limit_categories después del sort (si aplica)
+    # ------------------------------
     if limit_categories and limit_categories > 0:
         serie = serie.head(limit_categories)
         etiquetas = etiquetas.head(limit_categories)
 
+    # ------------------------------
+    # Validación final
+    # ------------------------------
     total = serie.clip(lower=0).sum()
     if total <= 0:
         raise ValueError("La suma de valores es 0; no es posible construir la torta.")
 
-    # --- COLORES ---
+    # ------------------------------
+    # Determinar colores
+    # ------------------------------
     if color is None:
-        # Paleta multicolor por defecto
         cmap = plt.get_cmap("tab20")
         color = [cmap(i % cmap.N) for i in range(len(serie))]
     elif isinstance(color, str):
-        # Un solo color
         color = [color] * len(serie)
-    elif isinstance(color, (list, tuple, np.ndarray)):
-        # Si pasan menos colores que categorías, repetimos la paleta
+    elif isinstance(color, (list, tuple)):
         color = list(color)
         if len(color) < len(serie):
             reps = int(np.ceil(len(serie) / len(color)))
             color = (color * reps)[:len(serie)]
 
-    # Plot
+    # ------------------------------
+    # Crear figura
+    # ------------------------------
     fig, ax = plt.subplots(figsize=(8, 8))
-    ax.pie(
+    ax.set_facecolor("white")
+
+    wedges, texts, autotexts = ax.pie(
         serie.values,
         labels=etiquetas.values,
         autopct='%1.1f%%',
@@ -809,10 +769,14 @@ def graficar_torta(
         colors=color,
         shadow=False,
     )
-    ax.set_title(titulo)
+
     ax.axis('equal')
+    if titulo:
+        ax.set_title(titulo, fontsize=16, fontweight="bold", pad=20)
+
     fig.tight_layout()
     return fig, ax
+
 
 def graficar_barras_horizontal(
     df: pd.DataFrame,
@@ -828,24 +792,22 @@ def graficar_barras_horizontal(
     conditions_any: Optional[List[Union[List[Any], List[List[Any]]]]] = None,
     distinct_on: Optional[str] = None,
     drop_dupes_before_sum: bool = False,
-    sort: Optional[Dict[str, str]] = None,          # {"by": "y"|"label", "order": "asc"|"desc"}
+    sort: Optional[Dict[str, str]] = None, 
     limit_categories: Optional[int] = None,
     show_legend: bool = True,
     show_values: bool = True,
-    # 👇 NUEVO
     legend_col: Optional[str] = None,
     colors_by_category: Optional[Dict[str, str]] = None,
-    **kwargs,   # absorbe parámetros extra
+    **kwargs,
 ) -> Tuple[plt.Figure, plt.Axes]:
 
-    # Validación base
     if not isinstance(df, pd.DataFrame):
         raise TypeError("El parámetro 'df' debe ser un DataFrame de pandas.")
 
     # Combinar X
     df2, xlabel_final, _ = _ensure_xlabel(df, xlabel)
 
-    # Determinar columnas numéricas (una sola métrica)
+    # Determinar la métrica y_cols
     if y is None:
         num_cols = df2.select_dtypes(include=[np.number]).columns.tolist()
         if not num_cols and not (distinct_on and agg in ("count", "distinct_count")):
@@ -853,8 +815,6 @@ def graficar_barras_horizontal(
         y_cols = [num_cols[0]] if num_cols else []
     else:
         if isinstance(y, list):
-            if not y:
-                raise ValueError("Lista 'y' vacía.")
             y = y[0]
         if y not in df2.columns:
             raise ValueError(f"La columna '{y}' no existe en el DataFrame.")
@@ -870,22 +830,18 @@ def graficar_barras_horizontal(
         conditions_any=conditions_any,
     )
 
-    # Preparar claves de agrupación (X + leyenda opcional)
+    # Claves de agrupación
     group_x = xlabel_final
-
     if legend_col:
         if legend_col not in dff.columns:
-            raise ValueError(f"La columna de leyenda '{legend_col}' no existe en el DataFrame.")
-
+            raise ValueError(f"La columna de leyenda '{legend_col}' no existe.")
         if group_x is None:
             group_x = legend_col
         else:
-            if isinstance(group_x, str):
-                group_x = [group_x, legend_col]
-            else:
-                group_x = list(group_x) + [legend_col]
+            group_x = [group_x] if isinstance(group_x, str) else list(group_x)
+            group_x.append(legend_col)
 
-    # Agregación
+    # Agregar
     df_plot = _aggregate_frame(
         dff,
         xlabel=group_x,
@@ -895,141 +851,111 @@ def graficar_barras_horizontal(
         drop_dupes_before_sum=drop_dupes_before_sum,
     )
 
-    # Asegurar objeto gráfico
+    # === TOP-N + Otros ===
+    if limit_categories and limit_categories > 0:
+        df_plot = df_plot.reset_index()
+        label_col = df_plot.columns[0]
+        df_plot = _apply_top_n_general(df_plot, label_col, limit_categories)
+        df_plot = df_plot.set_index(label_col)
+
     if isinstance(df_plot, pd.Series):
         df_plot = df_plot.to_frame(name=value_col or "valor")
 
     # =====================================================
-    # MODO 1: SIN LEYENDA (comportamiento actual)
+    # MODO 1 — SIN LEYENDA
     # =====================================================
     if not legend_col:
-        # Ordenamiento opcional
+
         if sort:
+            col = df_plot.columns[0]
             by = sort.get("by", "y")
-            order = sort.get("order", "desc")
-            ascending = (order == "asc")
+            ascending = sort.get("order", "desc") == "asc"
 
             if by == "label":
                 df_plot = df_plot.sort_index(ascending=ascending)
             else:
-                df_plot = df_plot.sort_values(by=df_plot.columns[0], ascending=ascending)
+                df_plot = df_plot.sort_values(by=col, ascending=ascending)
 
-        # Top-N opcional
-        if limit_categories and limit_categories > 0:
+        if limit_categories:
             df_plot = df_plot.head(limit_categories)
 
-        # Crear figura con estilo profesional
         fig, ax = plt.subplots(figsize=(12, max(6, len(df_plot) * 0.4)), facecolor='white')
         ax.set_facecolor('#f8f9fa')
 
         colname = df_plot.columns[0]
-        
-        # Color profesional si no se especifica
+
         if color is None or isinstance(color, str):
-            base_color = color if isinstance(color, str) else '#607D8B'
-            bar_color = base_color
+            bar_color = color if isinstance(color, str) else '#607D8B'
         else:
-            bar_color = color[0] if color else '#607D8B'
-        
+            bar_color = color[0]
+
         bars = ax.barh(
             df_plot.index.astype(str),
-            df_plot[colname], 
+            df_plot[colname],
             color=bar_color,
             edgecolor='white',
             linewidth=1.2,
             alpha=0.9
         )
-        
-        for bar in bars:
-            bar.set_zorder(3)
 
-        # Títulos y etiquetas mejoradas
         if titulo:
-            ax.set_title(titulo, fontsize=16, fontweight='bold', pad=20, color='#2c3e50')
-        ax.set_xlabel(colname, fontsize=11, fontweight='600', color='#34495e')
-        ax.set_ylabel(xlabel_final if xlabel_final else '', fontsize=11, fontweight='600', color='#34495e')
-        
-        # Grid mejorado
-        ax.grid(axis="x", linestyle="--", alpha=0.3, color='#bdc3c7', zorder=0)
+            ax.set_title(titulo, fontsize=16, fontweight='bold', pad=20)
+
+        ax.set_xlabel(colname)
+        ax.set_ylabel(xlabel_final or '')
+
+        ax.grid(axis="x", linestyle="--", alpha=0.3)
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
-        ax.spines['left'].set_color('#bdc3c7')
-        ax.spines['bottom'].set_color('#bdc3c7')
-        
-        # Tick styling
-        ax.tick_params(axis="both", labelsize=9, colors='#34495e')
 
-        # Mostrar valores con formato mejorado
         if show_values:
             for bar in bars:
                 v = bar.get_width()
-                if pd.isna(v):
+                if pd.isna(v): 
                     continue
-                formatted_val = f"{v:,.0f}" if v >= 1 else f"{v:.2f}"
                 ax.text(
                     v,
-                    bar.get_y() + bar.get_height() / 2,
-                    formatted_val,
-                    va='center',
-                    ha='left',
-                    fontsize=9,
-                    fontweight='600',
-                    color='#2c3e50'
+                    bar.get_y() + bar.get_height()/2,
+                    f"{v:,.0f}" if v >= 1 else f"{v:.2f}",
+                    va="center", ha="left", fontsize=9
                 )
 
-        # Leyenda mejorada
         if show_legend:
-            ax.legend([colname], loc='lower right', framealpha=0.95, 
-                      edgecolor='#bdc3c7', fontsize=10)
-        else:
-            leg = ax.get_legend()
-            if leg:
-                leg.remove()
+            ax.legend([colname])
 
         fig.tight_layout()
         return fig, ax
 
     # =====================================================
-    # MODO 2: CON LEYENDA (múltiples series agrupadas)
+    # MODO 2 — CON LEYENDA (única versión limpia)
     # =====================================================
 
-    # Esperamos índice MultiIndex: [xlabel, legend_col]
     if not isinstance(df_plot.index, pd.MultiIndex):
-        raise ValueError("Se esperaba un índice MultiIndex al usar 'legend_col'.")
+        raise ValueError("Se esperaba un índice MultiIndex al usar legend_col.")
 
     val_col = df_plot.columns[0]
-    df_wide = df_plot[val_col].unstack(level=-1)  # filas = categorías, columnas = leyenda
+    df_wide = df_plot[val_col].unstack(level=-1)
 
-    # Ordenamiento opcional
     if sort:
+        ascending = sort.get("order", "desc") == "asc"
         by = sort.get("by", "y")
-        order = sort.get("order", "desc")
-        ascending = (order == "asc")
-
         if by == "label":
             df_wide = df_wide.sort_index(ascending=ascending)
         else:
-            row_metric = df_wide.sum(axis=1)
-            df_wide = df_wide.loc[row_metric.sort_values(ascending=ascending).index]
+            df_wide = df_wide.loc[df_wide.sum(axis=1).sort_values(ascending=ascending).index]
 
-    # Top-N opcional
-    if limit_categories and limit_categories > 0:
+    if limit_categories:
         df_wide = df_wide.head(limit_categories)
 
-    # Construir figura agrupada
-    n_cats = len(df_wide.index)
-    fig, ax = plt.subplots(figsize=(12, max(6, n_cats * 0.4)), facecolor='white')
+    fig, ax = plt.subplots(figsize=(12, max(6, len(df_wide) * 0.4)), facecolor='white')
     ax.set_facecolor('#f8f9fa')
 
     y_labels = df_wide.index.astype(str).tolist()
     legend_values = df_wide.columns.tolist()
     n_series = len(legend_values)
     y_pos = np.arange(len(y_labels))
-
-    # altura de cada barra
     height = 0.8 / max(n_series, 1)
 
-    # Paleta de colores por serie
     def _color_for_series(name, idx):
         if colors_by_category and name in colors_by_category:
             return colors_by_category[name]
@@ -1037,18 +963,18 @@ def graficar_barras_horizontal(
             return color[idx]
         if isinstance(color, str):
             return color
-        base_palette = ['#607D8B', '#0e4a8f', '#58b12e', '#f39c12',
-                        '#8e44ad', '#16a085', '#c0392b', '#7f8c8d']
-        return base_palette[idx % len(base_palette)]
+        palette = ['#607D8B', '#0e4a8f', '#58b12e', '#f39c12',
+                   '#8e44ad', '#16a085', '#c0392b']
+        return palette[idx % len(palette)]
 
     for i, serie in enumerate(legend_values):
-        serie_vals = df_wide[serie].values
-        offset = (i - (n_series - 1) / 2) * height
+        vals = df_wide[serie].values
+        offset = (i - (n_series - 1)/2) * height
         c = _color_for_series(str(serie), i)
 
         bars = ax.barh(
             y_pos + offset,
-            serie_vals,
+            vals,
             height=height,
             label=str(serie),
             color=c,
@@ -1062,42 +988,25 @@ def graficar_barras_horizontal(
                 v = bar.get_width()
                 if pd.isna(v):
                     continue
-                formatted_val = f"{v:,.0f}" if v >= 1 else f"{v:.2f}"
                 ax.text(
                     v,
-                    bar.get_y() + bar.get_height() / 2,
-                    formatted_val,
-                    va='center',
-                    ha='left',
-                    fontsize=9,
-                    fontweight='600',
-                    color='#2c3e50'
+                    bar.get_y() + bar.get_height()/2,
+                    f"{v:,.0f}" if v >= 1 else f"{v:.2f}",
+                    ha="left", va="center", fontsize=9
                 )
 
-    # Etiquetas de eje
     ax.set_yticks(y_pos)
-    ax.set_yticklabels(y_labels, fontsize=9, color='#34495e')
-    ax.tick_params(axis="x", labelsize=9, colors='#34495e')
+    ax.set_yticklabels(y_labels)
+    ax.grid(axis="x", linestyle="--", alpha=0.3)
 
     if titulo:
-        ax.set_title(titulo, fontsize=16, fontweight='bold', pad=20, color='#2c3e50')
-    ax.set_xlabel(val_col, fontsize=11, fontweight='600', color='#34495e')
-    ax.set_ylabel(xlabel_final if xlabel_final else '', fontsize=11, fontweight='600', color='#34495e')
+        ax.set_title(titulo, fontsize=16, fontweight='bold')
 
-    ax.grid(axis="x", linestyle="--", alpha=0.3, color='#bdc3c7', zorder=0)
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.spines['left'].set_color('#bdc3c7')
-    ax.spines['bottom'].set_color('#bdc3c7')
+    ax.set_xlabel(val_col)
+    ax.set_ylabel(xlabel_final or '')
 
-    # Leyenda
     if show_legend:
-        ax.legend(loc='lower right', framealpha=0.95,
-                  edgecolor='#bdc3c7', fontsize=10, title=legend_col)
-    else:
-        leg = ax.get_legend()
-        if leg:
-            leg.remove()
+        ax.legend(title=legend_col)
 
     fig.tight_layout()
     return fig, ax
@@ -1121,8 +1030,13 @@ def graficar_tabla(
     # Columna de porcentaje
     percentage_of: Optional[str] = None,
     percentage_colname: str = "porcentaje",
+    # Top-N categorías
+    limit_categories: Optional[int] = None,
     # 👇 NUEVO: usar legend_col también en tablas
     legend_col: Optional[str] = None,
+    # 👇 NUEVO PARAMETRO multiples métricas
+    extra_measures: Optional[List[Dict[str, Any]]] = None,
+    hide_main_measure=False, 
 ) -> Tuple[plt.Figure, plt.Axes]:
 
     """
@@ -1207,6 +1121,88 @@ def graficar_tabla(
         # Reset index normal
         df_plot = df_plot.reset_index() if group_x is not None else df_plot.reset_index(drop=True)
 
+    
+    # ============================================================
+    # Procesar extra_measures (múltiples agregaciones)
+    # ============================================================
+    if extra_measures:
+        for measure in extra_measures:
+
+            col_name = measure.get("name")
+            if not col_name:
+                raise ValueError("Cada 'extra_measure' debe incluir 'name'.")
+
+            # Condiciones específicas para esta medida
+            m_all = measure.get("conditions_all")
+            m_any = measure.get("conditions_any")
+
+            # Agregación específica
+            agg_m = measure.get("agg", agg)
+
+            # distinct_on propio (o hereda si no está)
+            distinct_m = measure.get("distinct_on", distinct_on)
+
+            # Filtro independiente
+            dff_m = _prefilter_df(
+                dff,
+                unique_by=unique_by,
+                conditions_all=m_all,
+                conditions_any=m_any,
+            )
+
+            # Agregación independiente
+            df_extra = _aggregate_frame(
+                dff_m,
+                xlabel=group_x,
+                y_cols=y_cols,
+                agg=agg_m,
+                distinct_on=distinct_m,
+                drop_dupes_before_sum=drop_dupes_before_sum,
+                where=where
+            )
+
+            # Normalizar a DataFrame
+            if isinstance(df_extra, pd.Series):
+                df_extra = df_extra.to_frame(name=col_name)
+            else:
+                df_extra.columns = [col_name]
+
+            # Reset index para unir
+            df_extra = df_extra.reset_index()
+
+            # Unir por la primera columna (etiqueta)
+            label_col = df_plot.columns[0]
+            df_plot = df_plot.merge(df_extra, on=label_col, how="left")
+
+    # ===========================================================
+    # OCULTAR LA MEDIDA PRINCIPAL (si el usuario lo solicita)
+    # ===========================================================
+    if hide_main_measure:
+        # La primera columna SIEMPRE es el xlabel ("habito")
+        first_column = df_plot.columns[0]
+
+        # Las columnas extra son las declaradas en el JSON
+        extra_cols = []
+        if extra_measures:
+            for m in extra_measures:
+                col = m.get("name")
+                if col in df_plot.columns:
+                    extra_cols.append(col)
+
+        # Construimos la tabla final SIN la medida base
+        keep_cols = [first_column] + extra_cols
+
+        # Filtrar
+        df_plot = df_plot[keep_cols]
+    # ===========================================================
+
+    # === TOP-N + Otros (lógica unificada para tablas simples o pivotadas) ===
+    if limit_categories and limit_categories > 0:
+        # La primera columna SIEMPRE es la etiqueta (tras pivot/reset)
+        label_col = df_plot.columns[0]
+        # Aplicar la función universal
+        df_plot = _apply_top_n_general(df_plot, label_col, limit_categories)
+
     # --- Columna de porcentaje opcional (solo cuando NO hay pivot por legend_col) ---
     if percentage_of and not legend_col:
         if percentage_of not in df_plot.columns:
@@ -1244,13 +1240,13 @@ def graficar_tabla(
                     )
                 else:
                     df_formatted[col] = numeric_col.apply(
-                        lambda x: f"{x:,.0f}" if pd.notna(x) and x >= 1 else 
+                        lambda x: f"{x:,.0f}" if pd.notna(x) and x >= 1 else
                                  (f"{x:.2f}" if pd.notna(x) else "")
                     )
         except Exception:
             pass
 
-    # Figura con diseño profesional y más grande
+    # ========= Figura y tabla (una sola vez, sin duplicados) =========
     n_cols = len(df_formatted.columns)
     n_rows = len(df_formatted)
     fig_w = max(18, n_cols * 1)
@@ -1259,30 +1255,18 @@ def graficar_tabla(
     fig, ax = plt.subplots(figsize=(fig_w, fig_h), facecolor='white')
     ax.axis("off")
 
-    tabla = ax.table(
-        cellText=df_formatted.values.tolist(),
-        colLabels=df_formatted.columns.tolist(),
-        cellLoc="center",
-        loc="center",
-        colWidths=[0.28] * n_cols
-    )
-    tabla.auto_set_font_size(False)
-    tabla.set_fontsize(28)
-    tabla.scale(2.2, 4.2)
+    # === PREVENCIÓN DE TABLA VACÍA ===
+    if df_formatted.empty:
+        fig, ax = plt.subplots(figsize=(10, 2))
+        ax.axis("off")
+        ax.text(
+            0.5, 0.5,
+            "No hay datos para mostrar en la tabla",
+            ha="center", va="center",
+            fontsize=18, fontweight="bold"
+        )
+        return fig, ax
 
-    for col_idx in range(n_cols):
-        tabla.auto_set_column_width(col=col_idx)
-
-
-
-# Figura con diseño profesional y más grande
-    n_cols = len(df_formatted.columns)
-    n_rows = len(df_formatted)
-    fig_w = max(18, n_cols * 1)
-    fig_h = max(9, n_rows * 1)
-
-    fig, ax = plt.subplots(figsize=(fig_w, fig_h), facecolor='white')
-    ax.axis("off")
 
     tabla = ax.table(
         cellText=df_formatted.values.tolist(),
@@ -1299,12 +1283,7 @@ def graficar_tabla(
         tabla.auto_set_column_width(col=col_idx)
 
     # ===== Estilos de colores: encabezado azul, filas blancas (o color custom) =====
-    # Azul corporativo para encabezado
     header_bg = "#0e4a8f"
-
-    # Fondo de filas de datos:
-    # - si se pasa 'color' → se usa para las celdas de datos
-    # - si no se pasa → filas blancas
     data_bg = color if color else "#ffffff"
 
     n_rows = len(df_formatted)
@@ -1328,7 +1307,7 @@ def graficar_tabla(
         cell.set_edgecolor("#FFFFFF")
         cell.set_linewidth(1.5)
         cell.PAD = 0.42
- 
+
     # Título (recuerda que en plot_from_params ya lo estamos vaciando)
     if titulo:
         ax.set_title(titulo, fontsize=38, fontweight="bold", pad=60, color="#000000")
@@ -1508,13 +1487,25 @@ def _finalize_layout(fig, ax, *, legend_outside=True):
 
 
 @register("plt_from_params")
-def plot_from_params(df, params, *, show: bool=False):
+
+@register("plt_from_params")
+def plot_from_params(df: pd.DataFrame, params: Dict[str, Any], *, show: bool = False) -> Tuple[plt.Figure, plt.Axes]:
+    """
+    Router unificado para graficar según JSON de parámetros.
+    - Soporta: graficar_barras, graficar_barras_horizontal, graficar_torta, graficar_tabla
+    - Respeta binning, stack_columns, Top-N + 'Otros', legend_col, percentage_of, etc.
+    """
+
     import copy
-    import matplotlib.pyplot as plt
 
-    p = copy.deepcopy(params)
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError("df debe ser un DataFrame de pandas")
 
-    # --- Normalización del selector ---
+    p = copy.deepcopy(params) or {}
+
+    # -------------------------------------------------
+    # 1. Normalización del selector de función
+    # -------------------------------------------------
     fn_raw = p.get("function_name") or p.get("chart_type")
     if fn_raw is None:
         raise ValueError("Falta 'function_name' o 'chart_type' en params.")
@@ -1522,18 +1513,25 @@ def plot_from_params(df, params, *, show: bool=False):
     fn_key = str(fn_raw).strip().lower()
 
     DISPATCH = {
+        # nombres canónicos
         "graficar_barras": graficar_barras,
         "graficar_barras_horizontal": graficar_barras_horizontal,
         "graficar_torta": graficar_torta,
         "graficar_tabla": graficar_tabla,
 
+        # alias
         "barras": graficar_barras,
         "bar": graficar_barras,
+        "column": graficar_barras,
+        "col": graficar_barras,
+
         "barras_horizontal": graficar_barras_horizontal,
         "horizontal": graficar_barras_horizontal,
+        "barh": graficar_barras_horizontal,
 
         "torta": graficar_torta,
         "pie": graficar_torta,
+        "pastel": graficar_torta,
 
         "tabla": graficar_tabla,
         "table": graficar_tabla,
@@ -1543,16 +1541,24 @@ def plot_from_params(df, params, *, show: bool=False):
     if func is None:
         raise ValueError(f"Función de gráfico no reconocida: {fn_raw!r} (normalizado: {fn_key!r})")
 
-    # --- Parámetros comunes ---
-    xlabel  = p.get("xlabel")
-    y       = p.get("y")
-    agg     = p.get("agg", "sum")
-    titulo  = ""
-    #titulo  = p.get("title", "Gráfico")
-    color   = p.get("color")
-    tipo    = p.get("tipo")
+    # -------------------------------------------------
+    # 2. Parámetros base (comunes)
+    # -------------------------------------------------
+    xlabel = p.get("xlabel")
+    y      = p.get("y")
+    agg    = p.get("agg", "sum")
 
-    # --- Formateo general ---
+    # En tu flujo el título final viene del HTML, así que lo dejamos vacío
+    titulo = ""
+    # Si quisieras volver a usarlo desde params:
+    # titulo = p.get("title", "Gráfico")
+
+    color  = p.get("color")
+    tipo   = p.get("tipo")  # usado solo para formateo final
+
+    # -------------------------------------------------
+    # 3. Formateo general (ticks, wraps, etc.)
+    # -------------------------------------------------
     tick_fontsize = int(p.get("tick_fontsize", 9))
     rotation      = p.get("rotation", 35)
     wrap_width_x  = int(p.get("wrap_width_x", 20))
@@ -1561,50 +1567,88 @@ def plot_from_params(df, params, *, show: bool=False):
     max_chars_y   = int(p.get("max_chars_y", 120))
     legend_out    = bool(p.get("legend_outside", True))
 
-    # --- Formateo torta ---
+    # Tortas (labels)
     pie_max_chars = int(p.get("pie_max_chars", 60))
     pie_wrap_w    = int(p.get("pie_wrap_width", 25))
 
-    # --- Limpieza de condiciones ---
-    def _clean_conditions(cond):
-        if not cond:
+    # Sort general (solo lo usaremos en barras / horizontal / torta)
+    sort = p.get("sort")
+    if sort is not None and not isinstance(sort, dict):
+        sort = None
+
+    # -------------------------------------------------
+    # 4. Limpieza de condiciones (sin romper bloques)
+    # -------------------------------------------------
+    def _clean_conditions(cond_raw):
+        """
+        Acepta:
+          - None / [] → []
+          - [[col,op,val], ...]
+          - [[[c1],[c2]], [c3], ...]  (bloques AND dentro de OR)
+        Devuelve una estructura equivalente pero sin filas vacías/mal formadas.
+        """
+        if not cond_raw:
             return []
+
         cleaned = []
-        for c in cond:
-            if not c:
+
+        for item in cond_raw:
+            if not item:
                 continue
-            if not isinstance(c, (list, tuple)):
+
+            # Caso simple: ["col","==",5]
+            if isinstance(item, (list, tuple)) and len(item) == 3 and not isinstance(item[0], (list, tuple)):
+                col, op, val = item
+                if col is None or str(col).strip() == "":
+                    continue
+                cleaned.append([col, op, val])
                 continue
-            if len(c) != 3:
+
+            # Caso bloque: [[c1],[c2],...]
+            if isinstance(item, (list, tuple)) and item and isinstance(item[0], (list, tuple)):
+                block = []
+                for c in item:
+                    if not isinstance(c, (list, tuple)) or len(c) != 3:
+                        continue
+                    col, op, val = c
+                    if col is None or str(col).strip() == "":
+                        continue
+                    block.append([col, op, val])
+                if block:
+                    cleaned.append(block)
                 continue
-            col, op, val = c
-            if col is None or col == "" or str(col).strip() == "":
-                continue
-            cleaned.append([col, op, val])
+
+            # Otros formatos se ignoran
         return cleaned
 
-    # --- Extra: parámetros faltantes ---
-    unique_by             = p.get("unique_by")
-    conditions_all        = _clean_conditions(p.get("conditions_all"))
-    conditions_any        = _clean_conditions(p.get("conditions_any"))
-    distinct_on           = p.get("distinct_on")
-    drop_dupes_before_sum = p.get("drop_dupes_before_sum", False)
+    unique_by      = p.get("unique_by")
+    conditions_all = _clean_conditions(p.get("conditions_all"))
+    conditions_any = _clean_conditions(p.get("conditions_any"))
+    distinct_on    = p.get("distinct_on")
+    drop_dupes_before_sum = bool(p.get("drop_dupes_before_sum", False))
 
-    # --- BINNING ---
+    # -------------------------------------------------
+    # 5. Binning (agrupación por rangos)
+    # -------------------------------------------------
     binning = p.get("binning")
+    df_work = df
     if binning:
-        df, bucket_col = _apply_binning(df, binning)
-        xlabel = bucket_col
+        df_work, bucket_col = _apply_binning(df_work, binning)
+        xlabel = bucket_col  # la nueva X es el bucket
 
-    # --- PRE-FILTRADO ANTES DEL STACK ---
+    # -------------------------------------------------
+    # 6. PREFILTRO antes del stack (para stack_columns)
+    # -------------------------------------------------
     df_filtered = _prefilter_df(
-        df,
+        df_work,
         unique_by=unique_by,
         conditions_all=conditions_all,
         conditions_any=conditions_any,
     )
 
-    # --- STACK ---
+    # -------------------------------------------------
+    # 7. STACK opcional (apilar columnas)
+    # -------------------------------------------------
     stack = p.get("stack_columns")
     if stack:
         cols      = stack["columns"]
@@ -1613,16 +1657,30 @@ def plot_from_params(df, params, *, show: bool=False):
         label_map = stack.get("label_map")
         keep_val  = stack.get("keep_value")
 
-        df_filtered = _stack_columns(df_filtered, cols, output_col=out_col, value_col=val_col, label_map=label_map)
+        df_filtered = _stack_columns(
+            df_filtered,
+            cols,
+            output_col=out_col,
+            value_col=val_col,
+            label_map=label_map,
+        )
 
         if keep_val not in (None, "any", "", []):
             df_filtered = df_filtered[df_filtered[val_col] == keep_val]
 
-        xlabel = out_col
+        xlabel = out_col  # ahora la X es el nombre del stack
 
+    # -------------------------------------------------
+    # 8. Top-N (solo se pasa, la lógica vive en las funciones graficar_*)
+    # -------------------------------------------------
+    limit_categories = p.get("limit_categories")
+    if isinstance(limit_categories, str) and limit_categories.isdigit():
+        limit_categories = int(limit_categories)
 
-    # --- Preparar kwargs comunes ---
-    common_kwargs = dict(
+    # -------------------------------------------------
+    # 9. Construir kwargs comunes para TODAS las funciones
+    # -------------------------------------------------
+    common_kwargs: Dict[str, Any] = dict(
         xlabel=xlabel,
         y=y,
         agg=agg,
@@ -1633,51 +1691,67 @@ def plot_from_params(df, params, *, show: bool=False):
         conditions_any=conditions_any,
         distinct_on=distinct_on,
         drop_dupes_before_sum=drop_dupes_before_sum,
+        limit_categories=limit_categories,
     )
-        # Config específica de tablas: columna de porcentaje
+
+    # ---- Config específica de TABLAS ----
     if func is graficar_tabla:
-        percentage_of = p.get("percentage_of")
+        percentage_of     = p.get("percentage_of")
         percentage_colname = p.get("percentage_colname", "porcentaje")
         common_kwargs["percentage_of"] = percentage_of
         common_kwargs["percentage_colname"] = percentage_colname
 
-    # legend_col también usable en tablas (para pivotear columnas)
-    if func is graficar_tabla:
+        # legend_col también usable en tablas (pivot columnas)
         legend_col = p.get("legend_col")
         if legend_col is not None:
             common_kwargs["legend_col"] = legend_col
-
-            
-    # --- Normalización mínima de torta ---
-    if fn_key in ("graficar_torta", "torta", "pie") and isinstance(y, list):
-        y = y[0] if y else None
-        common_kwargs["y"] = y
-    
-    # --- Config específica de barras: leyendas / colores por categoría ---
+        # === NUEVO: múltiples medidas adicionales ===
+        extra_measures = p.get("extra_measures")
+        if extra_measures is not None:
+            if not isinstance(extra_measures, list):
+                raise ValueError("'extra_measures' debe ser una lista de objetos.")
+            common_kwargs["extra_measures"] = extra_measures
+        # Nueva opción: ocultar la métrica principal
+            hide_main_measure = p.get("hide_main_measure", False)
+            common_kwargs["hide_main_measure"] = hide_main_measure
+    # ---- Config específica de BARRAS / HORIZONTAL ----
     if func in (graficar_barras, graficar_barras_horizontal):
         legend_col = p.get("legend_col")
         colors_by_category = p.get("colors_by_category")
-
         if legend_col is not None:
             common_kwargs["legend_col"] = legend_col
         if colors_by_category is not None:
             common_kwargs["colors_by_category"] = colors_by_category
+        if sort is not None:
+            common_kwargs["sort"] = sort
 
-    # === Llamado central a la función sin repetir filtros internos ===
+    # ---- Config específica de TORTA ----
+    if func is graficar_torta:
+        # torta solo soporta una métrica → normaliza y si vino lista
+        if isinstance(y, list):
+            common_kwargs["y"] = y[0] if y else None
+        if sort is not None:
+            common_kwargs["sort"] = sort
+
+    # -------------------------------------------------
+    # 10. Evitar doble filtrado dentro de las funciones
+    # -------------------------------------------------
     safe_kwargs = common_kwargs.copy()
     safe_kwargs["conditions_all"] = None
     safe_kwargs["conditions_any"] = None
     safe_kwargs["unique_by"] = None
 
+    # Llamado real a la función de gráfico
     fig, ax = func(df_filtered, **safe_kwargs)
 
-
-    # --- Post-formateo según el tipo ---
+    # -------------------------------------------------
+    # 11. POST-FORMATEO: wrapping de labels, leyenda, etc.
+    # -------------------------------------------------
+    # Determinar tipo final si no vino explícito
     t = (tipo or "").lower()
-
     if not t:
-        ct = (p.get("chart_type") or "").lower()
-        if ct in ("barras", "bar", "column", "col"):
+        ct = (p.get("chart_type") or fn_key or "").lower()
+        if ct in ("barras", "bar", "column", "col", "graficar_barras"):
             t = "barras"
         elif ct in ("horizontal", "barh", "barras_horizontal", "graficar_barras_horizontal"):
             t = "barh"
@@ -1687,23 +1761,33 @@ def plot_from_params(df, params, *, show: bool=False):
             t = "tabla"
 
     if t in ("barras", "bar", "column", "col"):
-        _wrap_shorten_ticks(ax, axis="x", wrap_width=wrap_width_x, max_chars=max_chars_x, fontsize=tick_fontsize, rotation=rotation)
+        _wrap_shorten_ticks(
+            ax,
+            axis="x",
+            wrap_width=wrap_width_x,
+            max_chars=max_chars_x,
+            fontsize=tick_fontsize,
+            rotation=rotation,
+        )
 
     elif t in ("barh", "barras_h", "horizontal", "barra_horizontal"):
-        _wrap_shorten_ticks(ax, axis="y", wrap_width=wrap_width_y, max_chars=max_chars_y, fontsize=tick_fontsize)
+        _wrap_shorten_ticks(
+            ax,
+            axis="y",
+            wrap_width=wrap_width_y,
+            max_chars=max_chars_y,
+            fontsize=tick_fontsize,
+        )
 
     elif t in ("torta", "pie", "pastel"):
-        # Tomar SOLO los textos que no son porcentajes (autopct)
+        # Tomar SOLO textos que no son porcentajes (autopct)
         labels_raw = [txt.get_text() for txt in ax.texts if "%" not in txt.get_text()]
-
-    # Aplicar abreviación / wrap
         labels_fmt = _format_pie_labels(
             labels_raw,
             max_chars=pie_max_chars,
-            wrap_width=pie_wrap_w
+            wrap_width=pie_wrap_w,
         )
         _apply_pie_texts(ax, labels_fmt)
-
 
     _finalize_layout(fig, ax, legend_outside=legend_out)
 
@@ -1712,4 +1796,211 @@ def plot_from_params(df, params, *, show: bool=False):
         plt.show()
 
     return fig, ax
+
+
+# def plot_from_params(df, params, *, show: bool=False):
+#     import copy
+#     import matplotlib.pyplot as plt
+
+#     p = copy.deepcopy(params)
+
+#     # --- Normalización del selector ---
+#     fn_raw = p.get("function_name") or p.get("chart_type")
+#     if fn_raw is None:
+#         raise ValueError("Falta 'function_name' o 'chart_type' en params.")
+
+#     fn_key = str(fn_raw).strip().lower()
+
+#     DISPATCH = {
+#         "graficar_barras": graficar_barras,
+#         "graficar_barras_horizontal": graficar_barras_horizontal,
+#         "graficar_torta": graficar_torta,
+#         "graficar_tabla": graficar_tabla,
+
+#         "barras": graficar_barras,
+#         "bar": graficar_barras,
+#         "barras_horizontal": graficar_barras_horizontal,
+#         "horizontal": graficar_barras_horizontal,
+
+#         "torta": graficar_torta,
+#         "pie": graficar_torta,
+
+#         "tabla": graficar_tabla,
+#         "table": graficar_tabla,
+#     }
+
+#     func = DISPATCH.get(fn_key)
+#     if func is None:
+#         raise ValueError(f"Función de gráfico no reconocida: {fn_raw!r} (normalizado: {fn_key!r})")
+
+#     # --- Parámetros comunes ---
+#     xlabel  = p.get("xlabel")
+#     y       = p.get("y")
+#     agg     = p.get("agg", "sum")
+#     titulo  = ""
+#     #titulo  = p.get("title", "Gráfico")
+#     color   = p.get("color")
+#     tipo    = p.get("tipo")
+
+#     # --- Formateo general ---
+#     tick_fontsize = int(p.get("tick_fontsize", 9))
+#     rotation      = p.get("rotation", 35)
+#     wrap_width_x  = int(p.get("wrap_width_x", 20))
+#     wrap_width_y  = int(p.get("wrap_width_y", 30))
+#     max_chars_x   = int(p.get("max_chars_x", 85))
+#     max_chars_y   = int(p.get("max_chars_y", 120))
+#     legend_out    = bool(p.get("legend_outside", True))
+
+#     # --- Formateo torta ---
+#     pie_max_chars = int(p.get("pie_max_chars", 60))
+#     pie_wrap_w    = int(p.get("pie_wrap_width", 25))
+
+#     # --- Limpieza de condiciones ---
+#     def _clean_conditions(cond):
+#         if not cond:
+#             return []
+#         cleaned = []
+#         for c in cond:
+#             if not c:
+#                 continue
+#             if not isinstance(c, (list, tuple)):
+#                 continue
+#             if len(c) != 3:
+#                 continue
+#             col, op, val = c
+#             if col is None or col == "" or str(col).strip() == "":
+#                 continue
+#             cleaned.append([col, op, val])
+#         return cleaned
+
+#     # --- Extra: parámetros faltantes ---
+#     unique_by             = p.get("unique_by")
+#     conditions_all        = _clean_conditions(p.get("conditions_all"))
+#     conditions_any        = _clean_conditions(p.get("conditions_any"))
+#     distinct_on           = p.get("distinct_on")
+#     drop_dupes_before_sum = p.get("drop_dupes_before_sum", False)
+
+#     # --- BINNING ---
+#     binning = p.get("binning")
+#     if binning:
+#         df, bucket_col = _apply_binning(df, binning)
+#         xlabel = bucket_col
+
+#     # --- PRE-FILTRADO ANTES DEL STACK ---
+#     df_filtered = _prefilter_df(
+#         df,
+#         unique_by=unique_by,
+#         conditions_all=conditions_all,
+#         conditions_any=conditions_any,
+#     )
+
+#     # --- STACK ---
+#     stack = p.get("stack_columns")
+#     if stack:
+#         cols      = stack["columns"]
+#         out_col   = stack.get("output_col", "tipo_riesgo")
+#         val_col   = stack.get("value_col", "valor")
+#         label_map = stack.get("label_map")
+#         keep_val  = stack.get("keep_value")
+
+#         df_filtered = _stack_columns(df_filtered, cols, output_col=out_col, value_col=val_col, label_map=label_map)
+
+#         if keep_val not in (None, "any", "", []):
+#             df_filtered = df_filtered[df_filtered[val_col] == keep_val]
+
+#         xlabel = out_col
+
+
+#     # --- Preparar kwargs comunes ---
+#     common_kwargs = dict(
+#         xlabel=xlabel,
+#         y=y,
+#         agg=agg,
+#         titulo=titulo,
+#         color=color,
+#         unique_by=unique_by,
+#         conditions_all=conditions_all,
+#         conditions_any=conditions_any,
+#         distinct_on=distinct_on,
+#         drop_dupes_before_sum=drop_dupes_before_sum,
+#         limit_categories=p.get("limit_categories"),
+#     )
+#         # Config específica de tablas: columna de porcentaje
+#     if func is graficar_tabla:
+#         percentage_of = p.get("percentage_of")
+#         percentage_colname = p.get("percentage_colname", "porcentaje")
+#         common_kwargs["percentage_of"] = percentage_of
+#         common_kwargs["percentage_colname"] = percentage_colname
+
+#     # legend_col también usable en tablas (para pivotear columnas)
+#     if func is graficar_tabla:
+#         legend_col = p.get("legend_col")
+#         if legend_col is not None:
+#             common_kwargs["legend_col"] = legend_col
+
+            
+#     # --- Normalización mínima de torta ---
+#     if fn_key in ("graficar_torta", "torta", "pie") and isinstance(y, list):
+#         y = y[0] if y else None
+#         common_kwargs["y"] = y
+    
+#     # --- Config específica de barras: leyendas / colores por categoría ---
+#     if func in (graficar_barras, graficar_barras_horizontal):
+#         legend_col = p.get("legend_col")
+#         colors_by_category = p.get("colors_by_category")
+
+#         if legend_col is not None:
+#             common_kwargs["legend_col"] = legend_col
+#         if colors_by_category is not None:
+#             common_kwargs["colors_by_category"] = colors_by_category
+
+#     # === Llamado central a la función sin repetir filtros internos ===
+#     safe_kwargs = common_kwargs.copy()
+#     safe_kwargs["conditions_all"] = None
+#     safe_kwargs["conditions_any"] = None
+#     safe_kwargs["unique_by"] = None
+
+#     fig, ax = func(df_filtered, **safe_kwargs)
+
+
+#     # --- Post-formateo según el tipo ---
+#     t = (tipo or "").lower()
+
+#     if not t:
+#         ct = (p.get("chart_type") or "").lower()
+#         if ct in ("barras", "bar", "column", "col"):
+#             t = "barras"
+#         elif ct in ("horizontal", "barh", "barras_horizontal", "graficar_barras_horizontal"):
+#             t = "barh"
+#         elif ct in ("torta", "pie", "pastel", "graficar_torta"):
+#             t = "torta"
+#         elif ct in ("tabla", "table", "graficar_tabla"):
+#             t = "tabla"
+
+#     if t in ("barras", "bar", "column", "col"):
+#         _wrap_shorten_ticks(ax, axis="x", wrap_width=wrap_width_x, max_chars=max_chars_x, fontsize=tick_fontsize, rotation=rotation)
+
+#     elif t in ("barh", "barras_h", "horizontal", "barra_horizontal"):
+#         _wrap_shorten_ticks(ax, axis="y", wrap_width=wrap_width_y, max_chars=max_chars_y, fontsize=tick_fontsize)
+
+#     elif t in ("torta", "pie", "pastel"):
+#         # Tomar SOLO los textos que no son porcentajes (autopct)
+#         labels_raw = [txt.get_text() for txt in ax.texts if "%" not in txt.get_text()]
+
+#     # Aplicar abreviación / wrap
+#         labels_fmt = _format_pie_labels(
+#             labels_raw,
+#             max_chars=pie_max_chars,
+#             wrap_width=pie_wrap_w
+#         )
+#         _apply_pie_texts(ax, labels_fmt)
+
+
+#     _finalize_layout(fig, ax, legend_outside=legend_out)
+
+#     if show:
+#         plt.tight_layout()
+#         plt.show()
+
+#     return fig, ax
 
