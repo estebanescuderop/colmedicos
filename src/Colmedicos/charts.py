@@ -1667,8 +1667,8 @@ def plot_from_params(df: pd.DataFrame, params: Dict[str, Any], *, show: bool = F
 
         if keep_val not in (None, "any", "", []):
             df_filtered = df_filtered[df_filtered[val_col] == keep_val]
-
-        xlabel = out_col  # ahora la X es el nombre del stack
+        if xlabel is None:
+            xlabel = out_col  # ahora la X es el nombre del stack
 
     # -------------------------------------------------
     # 8. Top-N (solo se pasa, la lógica vive en las funciones graficar_*)

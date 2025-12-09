@@ -253,7 +253,8 @@ tareas = [
         "COORDINADOR": "Se usa si el cargo del trabajador es COORDINADOR o similares",
         "GERENTE": "Se usa si el cargo del trabajador es GERENTE o similares",
         "PUBLICISTA": "Se usa si el cargo del trabajador es PUBLICISTA o similares",
-        "OTRO": "Se usa para todos los demás cargos no clasificados en las categorías anteriores" 
+        "DIRECTOR": "Se usa si el cargo del trabajador es DIRECTOR o similares",
+        "OTRO": "Se usa para todos los demás cargos no clasificados en las categorías anteriores"
     },
       "registro_cols": "ocupacion",
       "nueva_columna": "categoria_cargo"
@@ -285,11 +286,12 @@ inf, meta = informe_final(df,
 
 
 
-# # # # Ruta del archivo Excel
-# ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\Informe pruebas colmedicos\Prueba_mult_registros.xlsx"
-# df_date = pd.read_excel(ruta_archivos)
+# # # # # Ruta del archivo Excel
+# # ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\Informe pruebas colmedicos\Prueba_mult_registros.xlsx"
+# # df_date = pd.read_excel(ruta_archivos)
 
 print(meta)
+
 
 
 # out = aplicar_multiples_columnas_gpt5(df_date, tareas)
@@ -359,15 +361,15 @@ print(meta)
 # rutica_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\Informe pruebas colmedicos\Emtelco_colmedicos.xlsx"
 # df_dato = pd.read_excel(rutica_archivos)
 
-# textico = """La exposición laboral actual hace referencia a la presencia de factores de riesgo ocupacionales a los cuales se encuentran expuestos los trabajadores en el desarrollo de sus funciones, de manera continua o intermitente, en su entorno laboral actual. Estos factores pueden ser de origen físico, químico, biológico, ergonómico, psicosocial, mecánico, etc, y su identificación se realiza con base en la información recolectada durante las valoraciones médico-ocupacionales, los relatos de los trabajadores y las condiciones observadas.
+textico = """La exposición laboral actual hace referencia a la presencia de factores de riesgo ocupacionales a los cuales se encuentran expuestos los trabajadores en el desarrollo de sus funciones, de manera continua o intermitente, en su entorno laboral actual. Estos factores pueden ser de origen físico, químico, biológico, ergonómico, psicosocial, mecánico, etc, y su identificación se realiza con base en la información recolectada durante las valoraciones médico-ocupacionales, los relatos de los trabajadores y las condiciones observadas.
 
-# Conforme al artículo 20 de la Resolución 1843 de 2025, esta información se consigna diferenciando la exposición por área de trabajo, proceso productivo u oficio específico, lo cual permite una caracterización más precisa del riesgo y sirve para orientar adecuadamente las acciones de vigilancia en salud.
+Conforme al artículo 20 de la Resolución 1843 de 2025, esta información se consigna diferenciando la exposición por área de trabajo, proceso productivo u oficio específico, lo cual permite una caracterización más precisa del riesgo y sirve para orientar adecuadamente las acciones de vigilancia en salud.
 
-# Exposición Laboral
-# #GRAFICA# #Gráfica de Torta llamada 'Tipo de riesgo' con un conteo de registros únicos de identificación donde incluya en x las columnas de riesgo_ergonomico=si o  riesgo_quimico=si o riesgo_psicosocial=si o riesgo_biomecanico=si#
+Exposición Laboral
+#GRAFICA# #Gráfica de Tablas llamada 'Tipo de riesgo' con un conteo de registros únicos de identificación donde incluya en xlabel  de forma obligatoria la categoria de cargos laborales y con una leyenda donde riesgo_ergonomico=Si o  riesgo_quimico=Si o riesgo_psicosocial=Si o riesgo_biomecanico=Si#
 
-# +Redacta dos párrafos de aproximadamente 60 palabras cada uno, analizando los tipos de riesgos de los trabajadores por cada oficio o cargo y su relación con determinantes sociales de la salud, barreras de acceso y patrones de vulnerabilidad, con base en: ||DATOS realiza el cálculo del conteo único de personas en identificación agrupado por cargo y donde riesgo_ergonomico=si, el mismo conteo único y columna cargo pero con filtro riesgo_quimico=si, el mismo conteo único y misma columna x pero filtrando riesgo_psicosocial=si y por ultimo mismo conteo único por cargo u oficio con filtro riesgo_biomecanico=si|| +"""
-#out1 = operaciones_gpt5(df_dato,textico)
++Redacta dos párrafos de aproximadamente 60 palabras cada uno, analizando los tipos de riesgos de los trabajadores por cada oficio o cargo y su relación con determinantes sociales de la salud, barreras de acceso y patrones de vulnerabilidad, con base en: ||DATOS realiza el cálculo del conteo único de personas en identificación agrupado por cargo y donde riesgo_ergonomico=Si, el mismo conteo único y columna cargo pero con filtro riesgo_quimico=Si, el mismo conteo único y misma columna x pero filtrando riesgo_psicosocial=Si y por ultimo mismo conteo único por cargo u oficio con filtro riesgo_biomecanico=Si|| +"""
+#out1 = operaciones_gpt5(df_otro,textico)
 #out1 = unir_idx_params_con_span_json_data(out1, textico)
 #import json
 #config_list = json.loads(out)
@@ -385,7 +387,7 @@ print(meta)
 #out = texto_completo + "\n\n" + out
 
 
-# out = graficos_gpt5(df_otro,texto_completo)
+# out = graficos_gpt5(df_otro,textico)
 # print(out)
 # import json
 # config_list = json.loads(out)

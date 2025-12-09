@@ -24,7 +24,7 @@ import plotly.express as px
 from Colmedicos.registry import register
 from Colmedicos.config import OPENAI_API_KEY
 
-API_KEY = "API"  # Reemplaza por tu API key de OpenAI  # Reemplaza por tu API key de OpenAI
+API_KEY = "API"
 instruccion = "Todo lo que no esté entre los signos ++, redactalo exactamente igual, lo que si esté, sigue las instrucciones y lo reemplazas por lo que haya originalmente entre ++, adicionalmente el texto literal quitale caracteres como: *, por nada del mundo modifiques el texto que encuentres entre el caracter numeral: # y saltos de línea innecesarios.\n\n"
 rol = """Eres un médico especialista en Salud Ocupacional en Colombia.
 Generas informes claros, técnicos y coherentes para empresas de todos los sectores económicos.
@@ -109,7 +109,10 @@ Debes devolver un arreglo en el mismo orden, con la forma:
 
 
 Nunca repitas la lista de columnas dentro de cada elemento.
+No omitas ningún elemento que cumpla con el formato.
 Nunca devuelvas texto fuera del JSON.
+Debes ser estricto y consistente. No inventes campos. Si un dato no está, trátalo como “no disponible”.
+Lee e interpreta cuidadosamente cada instrucción.
 
 REGLAS DE INTERPRETACIÓN
 
@@ -546,6 +549,9 @@ Dentro de cada `params`, usa exactamente la siguiente estructura (idéntica a la
 1. Cada bloque || ... || representa una instrucción independiente y debe generar un objeto:
    {"idx": <número>, "params": { ...estructura anterior... }}
 Nota: Unicamente procesa el texto entre || ... || todo el texto fuera de este debe ser ignorado.
+      - No te saltes ningún bloque ||...|| que esté bien formado.
+      - No agregues bloques adicionales que no estén en la entrada.
+      - No modifiques el orden de los bloques.
 
 2. El índice `idx` debe incrementarse secuencialmente (1, 2, 3, ...).
 
