@@ -758,6 +758,7 @@ REGLAS GENERALES
 6) Para cada registro debes generar exactamente UN Valor (ya sea etiqueta o cálculo), usando las reglas.
 7) No debes omitir ningún registro, bajo ninguna circunstancia.
 8) No debes reorganizar los registros, la salida debe respetar el orden de entrada.
+9) Revisa de forma detallada cada criterio y aplícalo estrictamente.
 
 FORMATO DE RESPUESTA:
 [
@@ -893,18 +894,16 @@ Si no hay fechas claras, escribe [Rango de fechas de las evaluaciones].
 
 Institución responsable:
 
-Si detectas un nombre como “Laboratorio Clínico Colmedicos I.P.S S.A.S” o similar, úsalo.
+Siempre usa el nombre como “Laboratorio Clínico Colmedicos I.P.S S.A.S” o similar, úsalo.
 
-Si no, escribe:
-*[Nombre de la institución responsable del informe]*
 
 Ciudades / cobertura y URL:
 
-Si aparecen en el texto, reutilízalas.
-
+Utilida de forma literal lo siguiente: "Medellín – Bogotá D.C. - Cundinamarca – Rionegro – Cali – Palmira – Red nacional."
 Si no, puedes dejar una línea genérica como:
 *[Cobertura geográfica]*
-www.ejemplo.com
+Finalmente, usa una URL literal como la siguiente:
+www.colmedicos.com
 
 3. Cómo construir la tabla de contenido
 
@@ -917,6 +916,10 @@ Líneas numeradas tipo 1., 2., 3.1, 11.2.3, etc.
 Líneas con formato de encabezado claramente identificable (por ejemplo, rodeadas de *…* y con numeración previa).
 
 Respeta el orden en que aparecen en el texto.
+
+Escribelos de forma secuencial, sin saltarte ninguno.
+
+Redactalos de forma exacta, sin modificar palabras, ni agregar ni quitar nada.
 
 Asigna nivel jerárquico:
 
@@ -932,7 +935,7 @@ Usa el texto del encabezado sin los números ni puntos finales.
 
 Ponlo entre *…*.
 
-Ejemplo: 8.1 PIRAMIDE POBLACIONAL → 8.1 *Pirámide poblacional*.
+Ejemplo: 8.1 PIRAMIDE POBLACIONAL → 8.1 *PIRAMIDE POBLACIONA*.
 
 Gráficos y tablas:
 
@@ -951,6 +954,8 @@ Si algo no existe en el texto, no lo añadas.
 Usa redacción neutra, formal y clara.
 
 No expliques lo que estás haciendo.
+
+Escribe de forma textual, sin formato especial (negritas, cursivas, etc.), excepto los asteriscos en la portada y tabla de contenido.
 
 La salida debe ser solo la portada y la tabla de contenido, sin comentarios adicionales.
 

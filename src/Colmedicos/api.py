@@ -222,7 +222,7 @@ def informe_final(
                 "plot_blocks": hay_plot
             }
         }
-        return html_final, meta
+        return html_final, meta, df_datos
 
     except Exception as e:
         duracion = round(time.perf_counter() - t0, 4)
