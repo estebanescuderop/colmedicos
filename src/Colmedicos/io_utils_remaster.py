@@ -4,20 +4,16 @@ import re
 import json
 import time
 import base64
-from io import BytesIO
-from pathlib import Path
 from collections.abc import Iterable
 from typing import Any, Dict, List, Tuple, Union, Optional, Callable
 
 # --- Third-party ---
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib._pylab_helpers import Gcf
 
 # --- Project-local ---
 from Colmedicos.registry import register
-from Colmedicos.ia import operaciones_gpt5, graficos_gpt5, columns_gpt5, ask_gpt5,columns_batch_gpt5
+from Colmedicos.ia import operaciones_gpt5, graficos_gpt5, ask_gpt5,columns_batch_gpt5
 from Colmedicos.math_ops import ejecutar_operaciones_condicionales
 from Colmedicos.charts import plot_from_params
 
@@ -112,257 +108,135 @@ def limpiar_texto_simple(
     return texto
 
 # ----------------------------
-# 3) Regex de bloques numerados
-# ----------------------------
-# ++IA_1: prompt++   o   ++prompt++
-_IA_BLOCK_RE = re.compile(
-    r"\+\s*(?:(?:IA_(?P<idx>\d+))\s*:\s*)?(?P<prompt>.*?)\s*\+",
-    flags=re.DOTALL | re.IGNORECASE
-)
-
-# ||DATOS_1: spec||   o   ||spec||
-_DATA_BLOCK_RE = re.compile(
-    r"\|\|\s*(?:(?:DATOS_(?P<idx>\d+))\s*:\s*)?(?P<prompt>.*?)\s*\|\|",
-    flags=re.DOTALL | re.IGNORECASE
-)
-
-# #GRAFICA_1#  o  #GRAFICO_2#  o  #GRAFICA#
-_PLOT_BLOCK_RE = re.compile(
-    r"#GRAFIC[AO](?:_(?P<idx>\d+))?#",
-    flags=re.DOTALL
-)
-
-# ----------------------------
-# 4) Parseadores
-# ----------------------------
-def _enumerate_blocks(matches, explicit_idx_group: str) -> List[Dict[str, Any]]:
-    results = []
-    next_auto = 1
-    for m in matches:
-        idx_str = m.groupdict().get(explicit_idx_group)
-        if idx_str is not None:
-            idx = int(idx_str)
-        else:
-            idx = next_auto
-            next_auto += 1
-        # Con este _PLOT_BLOCK_RE ya no hay grupo "prompt",
-        # así que aquí por defecto quedará vacío. Luego lo intentamos
-        # poblar en parse_plot_blocks buscando el bloque #...# siguiente.
-        results.append({
-            "idx": idx,
-            "prompt": "",
-            "span": (m.start(), m.end()),
-        })
-    return results
-
-
-@register("parse_ia_blocks")
-def parse_ia_blocks(text: str) -> List[Dict[str, Any]]:
-    """
-    Detecta bloques de datos del tipo:
-      - ||DATOS_1: ...especificación...||
-      - ||...especificación...||
-    y devuelve: [{'idx': int, 'prompt': str, 'span': (start, end)}, ...]
-    """
-    results: List[Dict[str, Any]] = []
-    next_auto = 1
-
-    for m in _IA_BLOCK_RE.finditer(text):
-        idx_str = m.group("idx")
-        if idx_str is not None:
-            idx = int(idx_str)
-        else:
-            idx = next_auto
-            next_auto += 1
-        prompt = (m.group("prompt") or "").strip()
-        results.append({
-            "idx": idx,
-            "prompt": prompt,
-            "span": (m.start(), m.end()),
-        })
-
-    return results
-
-@register("parse_data_blocks")
-def parse_data_blocks(text: str) -> List[Dict[str, Any]]:
-    """
-    Detecta bloques de datos del tipo:
-      - ||DATOS_1: ...especificación...||
-      - ||...especificación...||
-    y devuelve: [{'idx': int, 'prompt': str, 'span': (start, end)}, ...]
-    """
-    results: List[Dict[str, Any]] = []
-    next_auto = 1
-
-    for m in _DATA_BLOCK_RE.finditer(text):
-        idx_str = m.group("idx")
-        if idx_str is not None:
-            idx = int(idx_str)
-        else:
-            idx = next_auto
-            next_auto += 1
-
-        prompt = (m.group("prompt") or "").strip()
-        results.append({
-            "idx": idx,
-            "prompt": prompt,
-            "span": (m.start(), m.end()),
-        })
-
-    return results
-
-@register("parse_plot_blocks")
-def parse_plot_blocks(text: str) -> List[Dict[str, Any]]:
-    """
-    Detecta tokens #GRAFICA(_n)?# / #GRAFICO(_n)?#.
-    Si inmediatamente después (solo espacios/saltos) hay un bloque '# ... #',
-    lo toma como 'prompt' del gráfico correspondiente SIN consumir otros tokens.
-    """
-    # 1) Matches de los tokens
-    matches = list(_PLOT_BLOCK_RE.finditer(text))
-    items = _enumerate_blocks(matches, "idx")
-    if not items:
-        return items
-
-    # 2) Para cada token, intenta capturar un bloque '# ... #' inmediato
-    #    Se evalúa sobre el "remainder" que empieza justo tras el token.
-    for it in items:
-        start, end = it["span"]
-        remainder = text[end:]  # texto justo después del token
-        # Intento de match ANCLADO al inicio del remainder: \A
-        #m_prompt = _PROMPT_HASH_BLOCK_RE.match(remainder)
-        #if m_prompt:
-        #    inner = m_prompt.group("inner").strip()
-            # Evitar confundir otro marcador de gráfico:
-            # si el inner empieza por "GRAFIC" estamos frente a otro token, ignorar
-        #   if not inner.upper().startswith("GRAFIC"):
-        #       it["prompt"] = inner
-
-    return items
-
-# ----------------------------
 # 5) Reemplazo por familias
 # ----------------------------
+import re
+
+def extraer_ia_blocks(texto: str):
+    """
+    Extrae bloques de IA marcados entre + ... +
+    
+    Retorna una lista:
+    [
+      {"idx": 1, "prompt": "...", "span": (inicio, fin)},
+      {"idx": 2, "prompt": "...", "span": (inicio, fin)}
+    ]
+    """
+    patron = re.compile(r"\+(.*?)\+", re.DOTALL)
+    bloques = []
+
+    for i, match in enumerate(patron.finditer(texto), start=1):
+        bloques.append({
+            "idx": i,
+            "prompt": match.group(1).strip(),
+            "span": match.span()   # (inicio, fin)
+        })
+
+    return bloques
+
+def aplicar_ia_en_texto(texto: str, resultados_ia, formato: str = "html") -> str:
+    """
+    resultados_ia: lista de tuplas (idx, prompt, span_obj, resultado_ia)
+      - span_obj puede ser:
+          a) [start, end]
+          b) {"span": [start, end]}
+          c) {"spam": [start, end]} (tolerancia)
+    Reemplaza en `texto` cada bloque +...+ con el resultado generado por IA.
+    """
+
+    reemplazos = []
+
+    for item in resultados_ia:
+        # Saltar si llega un dict de error
+        if isinstance(item, dict):
+            continue
+
+        try:
+            idx, prompt, span_obj, resultado_ia = item
+        except Exception:
+            # estructura inesperada
+            continue
+
+        # Normalizar span a (start, end)
+        if isinstance(span_obj, dict):
+            span_list = span_obj.get("span") or span_obj.get("spam")
+        else:
+            span_list = span_obj
+
+        if not (isinstance(span_list, (list, tuple)) and len(span_list) == 2):
+            continue
+
+        start, end = span_list
+        if not (0 <= start <= end <= len(texto)):
+            continue
+
+        # --- construir reemplazo ---
+        if formato == "html":
+            rep = (
+                f'<div class="ia-bloque_{idx}">'
+                f'{resultado_ia}'
+                '</div>'
+)
+        else:
+            rep = f"\n[IA bloque {idx}]\n{resultado_ia}\n"
+
+        reemplazos.append((start, end, rep))
+
+    # Aplicar de derecha a izquierda (muy importante)
+    reemplazos.sort(key=lambda t: t[0], reverse=True)
+
+    out = texto
+    for start, end, rep in reemplazos:
+        out = out[:start] + rep + out[end:]
+
+    return out
+
 
 @register("process_ia_blocks")
 def process_ia_blocks(
-    texto: str,
-    ask_fn: Callable[[str], str] = ask_gpt5,
-    *,
-    max_retries: int = 2,
-    retry_delay_sec: float = 1.0,
-    on_error: str = "raise"  # "raise" | "return_input"
+    texto: str # "raise" | "return_input"
 ) -> str:
-    """
-    Envía TODO el texto a la IA para que redacte el informe completo.
-    No identifica marcadores ni hace reemplazos locales: la IA (ask_fn)
-    es la encargada de procesar únicamente lo que esté entre '+' según tu lógica.
 
-    Parámetros
-    ----------
-    texto : str
-        Documento completo a procesar.
-    ask_fn : Callable[[str], str]
-        Función IA (p. ej., ask_gpt5) que recibe el texto y devuelve el redactado final.
-        Esta función ya debe saber cómo tratar los segmentos entre '+'.
-    max_retries : int
-        Reintentos ante errores temporales de la IA.
-    retry_delay_sec : float
-        Pausa entre reintentos.
-    on_error : {"raise", "return_input"}
-        - "raise": propaga la excepción si la IA falla tras los reintentos.
-        - "return_input": devuelve el texto original si falla.
-
-    Retorna
-    -------
-    str
-        Texto final redactado por la IA.
-    """
-    last_err: Optional[Exception] = None
-    for attempt in range(max_retries + 1):
+   # 1) Ejecutar operaciones_gpt5 y asegurar conversión a JSON con spans
+    extract = extraer_ia_blocks(texto)
+    out = ask_gpt5(extract)
+ 
+    if isinstance(out, str):
         try:
-            respuesta = ask_fn(texto)
-            return (respuesta or "").strip()
-        except Exception as e:
-            last_err = e
-            if attempt < max_retries:
-                time.sleep(retry_delay_sec)
-            else:
-                if on_error == "return_input":
-                    return texto
-                raise
+            out = json.loads(out)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"JSON inválido: {e}") from e
 
+    if not isinstance(out, list):
+        raise TypeError("El resultado de operaciones_gpt5 debe ser una lista de objetos JSON.")
+
+    resultados_ops: List[
+        Tuple[int, Dict[str, Any], Union[Tuple[int, int], None], str]
+    ] = []
+
+
+    # 2) Ejecutar cada operación y formatear resultado
+    for item in out:
+        if isinstance(item, dict) and "params" in item:
+            idx = item.get("idx")
+            params = item.get("params")
+            span = item.get("span")
+
+            try:
+                resultado_fmt = params
+                resultados_ops.append((idx, params, span, resultado_fmt))
+            except Exception as e:
+                # Mantener trazabilidad sin romper el tipo (resultado como string legible)
+                error_txt = f"[error:{str(e)}]"
+                resultados_ops.append((idx, params, span, error_txt))
+    
+    # 3) Reemplazar spans por resultados (elige "html" o "texto simple")
+    texto_reemplazado = aplicar_ia_en_texto(texto, resultados_ops, formato="html")
+    return texto_reemplazado
 
 # ----------------------------
 # 5) Función que calcula DATOS.
 # ----------------------------
-
-#Función validada
-def unir_idx_params_con_span_json_data(
-    idx_params_any: Union[str, Iterable],
-    texto: str,
-    ensure_ascii: bool = False,
-    indent: Union[int, None] = None,
-) -> str:
-    """
-    Une (idx, params) con los span detectados en `texto` por parse_plot_blocks y
-    devuelve un JSON string con objetos: [{"idx": int, "params": {...}, "span": [s,e] | null}, ...].
-
-    Acepta `idx_params_any` como:
-      - str JSON: '[{"idx":1,"params":{...}}, [2, {...}], ...]'
-      - lista de dicts con 'idx' y 'params'
-      - lista de pares/tuplas [idx, params] o (idx, params)
-    """
-
-    # --- normalización mínima a [(idx:int, params:dict)]
-    def _normalize(x: Union[str, Iterable]) -> List[Tuple[int, Dict[str, Any]]]:
-        if isinstance(x, str):
-            try:
-                x = json.loads(x)
-            except json.JSONDecodeError:
-                return []
-        if not isinstance(x, Iterable):
-            return []
-
-        out: List[Tuple[int, Dict[str, Any]]] = []
-        for item in x:
-            if isinstance(item, dict) and "idx" in item and "params" in item and isinstance(item["params"], dict):
-                try:
-                    out.append((int(item["idx"]), item["params"]))
-                except Exception:
-                    pass
-            elif isinstance(item, (list, tuple)) and len(item) >= 2 and isinstance(item[1], dict):
-                try:
-                    out.append((int(item[0]), item[1]))
-                except Exception:
-                    pass
-        return out
-
-    idx_params = _normalize(idx_params_any)
-    if not idx_params:
-        return json.dumps([], ensure_ascii=ensure_ascii, indent=indent)
-
-    # --- mapa idx -> span usando parse_plot_blocks(texto)
-    spans_by_idx: Dict[int, Any] = {}
-    for it in (parse_data_blocks(texto) or []):
-        if isinstance(it, dict) and "idx" in it and "span" in it:
-            try:
-                spans_by_idx[int(it["idx"])] = it["span"]
-            except Exception:
-                pass
-
-    # --- construir salida como lista de objetos JSON-friendly
-    result = []
-    for idx, params in idx_params:
-        span = spans_by_idx.get(idx, None)
-        # Normalizar span a lista de 2 enteros si viene como tupla
-        if isinstance(span, tuple):
-            span = list(span)
-        result.append({"idx": idx, "params": params, "span": span})
-
-    return json.dumps(result, ensure_ascii=ensure_ascii, indent=indent)
-
-
 def aplicar_operaciones_en_texto(texto: str, resultados_ops, formato: str = "texto") -> str:
     """
     resultados_ops: lista de tuplas (idx, params, span_obj, resultado_formateado)
@@ -399,7 +273,7 @@ def aplicar_operaciones_en_texto(texto: str, resultados_ops, formato: str = "tex
 
         # Reemplazo según formato
         if formato == "html":
-            reemplazo = f'<pre style="background:#f9f9f9;padding:10px;border-radius:8px;">{resultado_fmt}</pre>'
+           reemplazo = f'<pre>{resultado_fmt}</pre>'
         else:
             # 🔹 Versión de texto plano
             reemplazo = f"\n[Resultado operación {idx}]:\n{resultado_fmt}\n"
@@ -419,6 +293,18 @@ def aplicar_operaciones_en_texto(texto: str, resultados_ops, formato: str = "tex
 def _to_base64(s: str) -> str:
     return base64.b64encode(s.encode("utf-8")).decode("ascii")
 
+@register("extraer_data_blocks")
+def extraer_data_blocks(texto: str):
+    patron = re.compile(r"\|\|(.*?)\|\|", re.DOTALL)
+    bloques = []
+    for i, match in enumerate(patron.finditer(texto), start=1):
+        bloques.append({
+            "idx": i,
+            "prompt": match.group(1),
+            "span": match.span(),
+        })
+    return bloques
+
 
 @register("process_data_blocks")
 def process_data_blocks(df: pd.DataFrame, texto: str):
@@ -426,15 +312,14 @@ def process_data_blocks(df: pd.DataFrame, texto: str):
     Réplica del pipeline_graficos_gpt5_final pero para OPERACIONES:
 
     - operaciones_gpt5(df, texto) -> lista JSON de objetos con {idx, params, ...}
-    - unir_idx_params_con_span_json(..., texto) -> adjunta el span correcto
     - ejecutar_operaciones_condicionales(df, params) -> ejecuta la operación
     - _format_result_plain(resultado) -> string final a insertar
     - aplicar_operaciones_en_texto(texto, resultados_ops, formato="html") -> reemplaza ||...||
     """
     # 1) Ejecutar operaciones_gpt5 y asegurar conversión a JSON con spans
-    out = operaciones_gpt5(df, texto)
-    out = unir_idx_params_con_span_json_data(out, texto)  # mantenemos el mismo unificador de spans
-
+    extract = extraer_data_blocks(texto)
+    out = operaciones_gpt5(df, extract)
+ 
     if isinstance(out, str):
         try:
             out = json.loads(out)
@@ -518,70 +403,6 @@ def _fig_to_data_uri(fig) -> str:
     b64 = base64.b64encode(buf.read()).decode("ascii")
     return f"data:image/png;base64,{b64}"
 
-def unir_idx_params_con_span_json(
-    idx_params_any: Union[str, Iterable],
-    texto: str,
-    ensure_ascii: bool = False,
-    indent: Union[int, None] = None,
-) -> str:
-    """
-    Une (idx, params) con los span detectados en `texto` por parse_plot_blocks y
-    devuelve un JSON string con objetos: [{"idx": int, "params": {...}, "span": [s,e] | null}, ...].
-
-    Acepta `idx_params_any` como:
-      - str JSON: '[{"idx":1,"params":{...}}, [2, {...}], ...]'
-      - lista de dicts con 'idx' y 'params'
-      - lista de pares/tuplas [idx, params] o (idx, params)
-    """
-
-    # --- normalización mínima a [(idx:int, params:dict)]
-    def _normalize(x: Union[str, Iterable]) -> List[Tuple[int, Dict[str, Any]]]:
-        if isinstance(x, str):
-            try:
-                x = json.loads(x)
-            except json.JSONDecodeError:
-                return []
-        if not isinstance(x, Iterable):
-            return []
-
-        out: List[Tuple[int, Dict[str, Any]]] = []
-        for item in x:
-            if isinstance(item, dict) and "idx" in item and "params" in item and isinstance(item["params"], dict):
-                try:
-                    out.append((int(item["idx"]), item["params"]))
-                except Exception:
-                    pass
-            elif isinstance(item, (list, tuple)) and len(item) >= 2 and isinstance(item[1], dict):
-                try:
-                    out.append((int(item[0]), item[1]))
-                except Exception:
-                    pass
-        return out
-
-    idx_params = _normalize(idx_params_any)
-    if not idx_params:
-        return json.dumps([], ensure_ascii=ensure_ascii, indent=indent)
-
-    # --- mapa idx -> span usando parse_plot_blocks(texto)
-    spans_by_idx: Dict[int, Any] = {}
-    for it in (parse_plot_blocks(texto) or []):
-        if isinstance(it, dict) and "idx" in it and "span" in it:
-            try:
-                spans_by_idx[int(it["idx"])] = it["span"]
-            except Exception:
-                pass
-
-    # --- construir salida como lista de objetos JSON-friendly
-    result = []
-    for idx, params in idx_params:
-        span = spans_by_idx.get(idx, None)
-        # Normalizar span a lista de 2 enteros si viene como tupla
-        if isinstance(span, tuple):
-            span = list(span)
-        result.append({"idx": idx, "params": params, "span": span})
-
-    return json.dumps(result, ensure_ascii=ensure_ascii, indent=indent)
-
 def aplicar_graficos_en_texto(texto: str, resultados_graficos, formato: str = "html") -> str:
     """
     resultados_graficos: lista de tuplas (idx, params, span_obj, data_uri)
@@ -640,17 +461,40 @@ def aplicar_graficos_en_texto(texto: str, resultados_graficos, formato: str = "h
 
     return out
 
+import re
 
-
-def _to_base64(s: str) -> str:
-    return base64.b64encode(s.encode("utf-8")).decode("ascii")
+@register("extraer_plot_blocks")
+def extraer_plot_blocks(texto: str):
+    """
+    Extrae todo lo que esté entre # ... # en el texto.
+    
+    Ejemplo:
+        #GRAFICA#
+        # Instrucción de gráfica #
+    
+    Devuelve:
+    [
+        {"idx": 1, "prompt": "GRAFICA", "span": (start,end)},
+        {"idx": 2, "prompt": "Instrucción de gráfica", "span": (start,end)}
+    ]
+    """
+    patron = re.compile(r"#\s*(.*?)\s*#", re.DOTALL)
+    
+    bloques = []
+    for i, match in enumerate(patron.finditer(texto), start=1):
+        bloques.append({
+            "idx": i,
+            "prompt": match.group(1).strip(),
+            "span": match.span(),
+        })
+    
+    return bloques
 
 
 def process_plot_blocks(df: pd.DataFrame, texto: str):
     # Ejecutar graficos_gpt5 y asegurar conversión a JSON
-    #texto = parse_plot_blocks(texto)
-    out = graficos_gpt5(df, texto)
-    out = unir_idx_params_con_span_json(out, texto)
+    extract = extraer_plot_blocks(texto)
+    out = graficos_gpt5(df, extract)
     if isinstance(out, str):
         try:
             out = json.loads(out)
@@ -683,361 +527,218 @@ def process_plot_blocks(df: pd.DataFrame, texto: str):
 
     return texto_reemplazado
 
+
+@register("aplicar_multiples_columnas_gpt5")
 def aplicar_multiples_columnas_gpt5(
     df: pd.DataFrame,
     tareas: List[Dict[str, Any]],
     *,
     replace_existing: bool = True,
-    chunk_size: int = 200,
-    debug: bool = False
-) -> pd.DataFrame:
+    chunk_tareas: int = 1,
+    chunk_registros: int = 300,
+    debug: bool = False,
+    fn_ia = columns_batch_gpt5
+):
+    """
+    Versión optimizada con CLUSTERING:
+    Agrupa registros con los mismos valores en columnas_necesarias
+    para reducir llamadas a IA sin alterar la lógica original.
+    """
 
     import json
     import math
+    from collections import defaultdict
 
     if not tareas:
         return df
 
     df_out = df.copy()
 
-    # -------------------------
-    # Helpers
-    # -------------------------
-    def _parse_val(val):
-        if isinstance(val, dict):
-            return val
-        if isinstance(val, str) and val.strip().startswith("{"):
-            try:
-                j = json.loads(val)
-                if isinstance(j, dict):
-                    return j
-            except:
-                pass
-        return {"valor": val}
+    def _chunk_list(lst, size):
+        for i in range(0, len(lst), size):
+            yield lst[i:i+size]
 
-    def _build_registro(row, cols_list):
-        if len(cols_list) == 1:
-            return _parse_val(row[cols_list[0]])
-        return {c: row[c] for c in cols_list}
-
-    # -------------------------
-    # Procesar cada tarea
-    # -------------------------
+    # Inicializar columnas de salida
     for tarea in tareas:
+        col = tarea["nueva_columna"]
+        if col not in df_out.columns:
+            df_out[col] = None
 
-        criterios      = tarea["criterios"]
-        registro_cols  = tarea["registro_cols"]
-        nueva_col      = tarea["nueva_columna"]
+    # Procesamiento por batches de tareas
+    for tareas_batch in _chunk_list(tareas, chunk_tareas):
 
-        fn_ia    = tarea.get("fn_ia", columns_batch_gpt5)
-        on_error = tarea.get("on_error", None)
+        # 1️⃣ Determinar qué columnas necesita IA
+        columnas_necesarias = set()
+        for tarea in tareas_batch:
+            cols = tarea["registro_cols"]
+            if isinstance(cols, str):
+                columnas_necesarias.add(cols)
+            else:
+                columnas_necesarias.update(cols)
+        columnas_necesarias = list(columnas_necesarias)
 
-        cols_list = [registro_cols] if isinstance(registro_cols, str) else list(registro_cols)
+        # 2️⃣ Preparar metadata de tareas para IA
+        tareas_para_ia = []
+        for tarea in tareas_batch:
+            tareas_para_ia.append({
+                "columna": tarea["nueva_columna"],
+                "criterios": tarea["criterios"],
+                "registro_cols": tarea["registro_cols"]
+            })
 
-        if (not replace_existing) and (nueva_col in df_out.columns):
-            raise ValueError(f"La columna '{nueva_col}' ya existe.")
+        # Procesar registros por batches
+        for reg_indices in _chunk_list(df_out.index.tolist(), chunk_registros):
 
-        df_out[nueva_col] = None
+            # --- CLUSTERING: agrupar registros idénticos ---
+            clusters = defaultdict(list)   # key → lista de ids
+            registros_unicos = {}          # key → registro dict
 
-        total_rows = len(df_out)
-        n_chunks = math.ceil(total_rows / chunk_size)
+            for idx in reg_indices:
+                row = df_out.loc[idx]
+                registro = {col: row[col] for col in columnas_necesarias}
 
-        for i in range(n_chunks):
+                # llave determinista para agrupar
+                key = tuple(registro[col] for col in columnas_necesarias)
 
-            start = i * chunk_size
-            end   = min(start + chunk_size, total_rows)
-            df_chunk = df_out.iloc[start:end]
+                clusters[key].append(idx)
 
-            registros = []
-            for idx_df, row in df_chunk.iterrows():
-                registros.append({
-                    "idx": int(idx_df),
-                    "registro": _build_registro(row, cols_list)
+                # Guardar solo un ejemplo por grupo
+                if key not in registros_unicos:
+                    registros_unicos[key] = registro
+
+            # Construir registros compactados para IA
+            registros_para_ia = []
+            for group_id, (key, registro) in enumerate(registros_unicos.items()):
+                registros_para_ia.append({
+                    "idx": f"G{group_id}",   # id sintético del grupo
+                    "registro": registro
                 })
 
-            # Llamado IA
+            # Payload final para IA
+            payload = {
+                "Tareas": tareas_para_ia,
+                "Registros": registros_para_ia
+            }
+
+            # --- Llamar IA ---
             try:
-                respuesta = fn_ia({"Criterios": criterios}, {"Registros": registros})
+                respuesta = fn_ia(payload)
             except Exception as e:
-                if debug:
-                    print("ERROR IA:", e)
-                for r in registros:
-                    df_out.at[r["idx"], nueva_col] = on_error
+                print("Error IA:", e)
                 continue
 
-            if debug:
-                print("RESPUESTA IA:", respuesta)
+            resultados = respuesta.get("Resultados", {})
 
-            # Normalizar respuesta
-            resultados = None
+            # --- Reasignar resultados a TODOS los ids del grupo ---
+            for colname, lista_items in resultados.items():
 
-            # Caso A → {"resultados": [...]}
-            if isinstance(respuesta, dict) and "resultados" in respuesta:
-                resultados = respuesta["resultados"]
+                # Mapa: id_ia → etiqueta
+                mapa_respuestas = {}
+                for item in lista_items:
+                    id_ia = item.get("id", item.get("idx"))
+                    val = item.get("resultado", item.get("etiqueta"))
+                    mapa_respuestas[id_ia] = val
 
-            # Caso B → lista de items
-            elif isinstance(respuesta, list):
-                resultados = respuesta
+                # Reaplicar resultados a cada grupo
+                for group_id, (key, _) in enumerate(registros_unicos.items()):
+                    etiqueta = mapa_respuestas.get(f"G{group_id}")
 
-            # fallback
-            if resultados is None:
-                for r in registros:
-                    df_out.at[r["idx"], nueva_col] = on_error
-                continue
+                    if etiqueta is None:
+                        continue
 
-            # Mapear cada resultado
-            for item in resultados:
-
-                idx = item.get("idx", item.get("id"))
-                etiqueta = item.get("resultado", item.get("etiqueta", on_error))
-
-                if idx in df_out.index:
-                    df_out.at[idx, nueva_col] = etiqueta
+                    # asignar a todos los registros originales
+                    for rid in clusters[key]:
+                        if rid in df_out.index:
+                            df_out.at[rid, colname] = etiqueta
 
     return df_out
 
 
+
+
+# @register("aplicar_multiples_columnas_gpt5")
 # def aplicar_multiples_columnas_gpt5(
 #     df: pd.DataFrame,
 #     tareas: List[Dict[str, Any]],
 #     *,
 #     replace_existing: bool = True,
-# ) -> pd.DataFrame:
-#     """
-#     Procesa múltiples columnas nuevas usando GPT en modo batch.
-#     Para cada tarea:
-#       - toma los registros del DF,
-#       - arma un batch JSON con IDs secuenciales,
-#       - llama a columns_batch_gpt5(),
-#       - recibe un array con {"id": "...", "etiqueta": "..."},
-#       - reconstruye la columna en el DF.
-
-#     Mantiene la lógica original, pero optimizando costos y velocidad.
-#     """
+#     chunk_tareas: int = 3,
+#     chunk_registros: int = 200,   # ahora sí será suficiente
+#     debug: bool = False,
+#     fn_ia = columns_batch_gpt5
+# ):
 
 #     import json
+#     import math
 
-#     # Si no hay tareas → devolver igual
 #     if not tareas:
 #         return df
 
-#     # Trabajamos sobre una copia
-#     out = df.copy()
+#     df_out = df.copy()
 
-#     # =====================================================
-#     # Helpers compatibles con tu flujo original
-#     # =====================================================
+#     def _chunk_list(lst, size):
+#         for i in range(0, len(lst), size):
+#             yield lst[i:i+size]
 
-#     def _parse_val(val):
-#         """Normaliza valores: si es JSON lo convierte en dict."""
-#         if isinstance(val, dict):
-#             return val
-#         if isinstance(val, str) and val.strip().startswith("{"):
-#             try:
-#                 j = json.loads(val)
-#                 if isinstance(j, dict):
-#                     return j
-#             except Exception:
-#                 pass
-#         return {"valor": val}
-
-#     def _build_registro(row, cols_list):
-#         """Construye un registro compatible con el clasificador."""
-#         if len(cols_list) == 1:
-#             return _parse_val(row[cols_list[0]])
-#         return {c: row[c] for c in cols_list}
-
-#     # =====================================================
-#     # Procesar cada tarea de clasificación
-#     # =====================================================
+#     # Inicializar columnas de salida
 #     for tarea in tareas:
+#         col = tarea["nueva_columna"]
+#         if col not in df_out.columns:
+#             df_out[col] = None
 
-#         criterios      = tarea["criterios"]        # texto plano
-#         registro_cols  = tarea["registro_cols"]
-#         nueva_columna  = tarea["nueva_columna"]
+#     # Procesamiento por batches de tareas
+#     for tareas_batch in _chunk_list(tareas, chunk_tareas):
 
-#         fn_ia    = tarea.get("fn_ia", columns_batch_gpt5)
-#         on_error = tarea.get("on_error", None)
+#         # Calcular columnas necesarias del registro (UNIÓN)
+#         columnas_necesarias = set()
+#         for tarea in tareas_batch:
+#             cols = tarea["registro_cols"]
+#             if isinstance(cols, str):
+#                 columnas_necesarias.add(cols)
+#             else:
+#                 columnas_necesarias.update(cols)
 
-#         # Convertir registro_cols a lista
-#         cols_list = [registro_cols] if isinstance(registro_cols, str) else list(registro_cols)
+#         columnas_necesarias = list(columnas_necesarias)
 
-#         # Reindex temporalmente a 0..N-1 para que coincidan los IDs
-#         out = out.reset_index(drop=True)
-
-#         # =====================================================
-#         # Construir el batch de registros a enviar a la IA
-#         # =====================================================
-#         registros_batch = []
-
-#         for i in range(len(out)):
-#             reg = _build_registro(out.loc[i], cols_list)
-#             registros_batch.append({
-#                 "id": str(i),     # El batch trabaja con string IDs, consistente con tu prompt
-#                 "registro": reg
+#         # Preparación de tareas
+#         tareas_para_ia = []
+#         for tarea in tareas_batch:
+#             tareas_para_ia.append({
+#                 "columna": tarea["nueva_columna"],
+#                 "criterios": tarea["criterios"],
+#                 "registro_cols": tarea["registro_cols"]
 #             })
 
-#         # Estructura enviada al modelo
-#         payload = {
-#             "Criterios": criterios,
-#             "Registros": registros_batch,
-#         }
+#         # Chunkear registros
+#         for reg_indices in _chunk_list(df_out.index.tolist(), chunk_registros):
 
-#         # =====================================================
-#         # Llamada real a la IA en batch
-#         # =====================================================
-#         try:
-#             resultados = fn_ia(payload, payload)   # tu función espera (criterios, registros) aunque sean el mismo dict
-#         except Exception:
-#             # Si falló el batch → llenar con on_error
-#             out[nueva_columna] = on_error
-#             continue
+#             registros = []
+#             for idx in reg_indices:
+#                 row = df_out.loc[idx]
+#                 registro = {col: row[col] for col in columnas_necesarias}
+#                 registros.append({"idx": idx, "registro": registro})
 
-#         # =====================================================
-#         # Normalizar la respuesta del modelo
-#         # =====================================================
-#         mapa = {}   # id → etiqueta
-
-#         if isinstance(resultados, list):
-#             for item in resultados:
-#                 if not isinstance(item, dict):
-#                     continue
-
-#                 idx = str(item.get("id"))
-#                 etiqueta = item.get("etiqueta")
-
-#                 if idx is not None:
-#                     mapa[idx] = etiqueta
-#         else:
-#             # Caso inesperado: respuesta no es lista
-#             out[nueva_columna] = on_error
-#             continue
-
-#         # =====================================================
-#         # Construir la nueva columna con los resultados
-#         # =====================================================
-#         nueva_series = []
-
-#         for i in range(len(out)):
-#             key = str(i)
-#             nueva_series.append(mapa.get(key, on_error))
-
-#         # Validar reemplazo
-#         if (not replace_existing) and (nueva_columna in out.columns):
-#             raise ValueError(
-#                 f"La columna '{nueva_columna}' ya existe. "
-#                 f"Activa replace_existing=True para reemplazarla."
-#             )
-
-#         out[nueva_columna] = nueva_series
-
-#     # Retornar DF final
-#     return out
-
-
-# def aplicar_multiples_columnas_gpt5(
-#     df: pd.DataFrame,
-#     tareas: List[Dict[str, Any]],
-#     *,
-#     replace_existing: bool = True,
-# ) -> pd.DataFrame:
-#     """
-#     Procesa múltiples columnas nuevas usando IA.
-
-#     Si 'tareas' está vacío → devuelve df.
-#     Permite reemplazar columnas existentes si replace_existing=True.
-
-#     Cada tarea debe incluir:
-#       - 'criterios'
-#       - 'registro_cols'
-#       - 'nueva_columna'
-#       - opcional: 'fn_ia'
-#       - opcional: 'on_error'
-#     """
-
-#     import json
-
-#     # -------------------------------------
-#     # 🟢 Si no hay tareas, devolver el df intacto
-#     # -------------------------------------
-#     if not tareas:
-#         return df
-
-#     out = df.copy()
-
-#     # --------------------------
-#     # Helpers compartidos
-#     # --------------------------
-#     def _parse_val(val):
-#         if isinstance(val, dict):
-#             return val
-#         if isinstance(val, str) and val.strip().startswith("{"):
-#             try:
-#                 j = json.loads(val)
-#                 if isinstance(j, dict):
-#                     return j
-#             except Exception:
-#                 pass
-#         return {"valor": val}
-
-#     def _build_registro(row, cols_list):
-#         if len(cols_list) == 1:
-#             return _parse_val(row[cols_list[0]])
-#         return {c: row[c] for c in cols_list}
-
-#     def _key(reg):
-#         try:
-#             return json.dumps(reg, ensure_ascii=False, sort_keys=True)
-#         except Exception:
-#             return str(reg)
-
-#     # -----------------------------------------
-#     # Procesar cada tarea
-#     # -----------------------------------------
-#     for tarea in tareas:
-
-#         criterios      = tarea["criterios"]
-#         registro_cols  = tarea["registro_cols"]
-#         nueva_columna  = tarea["nueva_columna"]
-
-#         fn_ia    = tarea.get("fn_ia", columns_gpt5)
-#         on_error = tarea.get("on_error", None)
-
-#         # Normalizar input
-#         cols_list = [registro_cols] if isinstance(registro_cols, str) else list(registro_cols)
-
-#         # Cache por tarea
-#         cache = {}
-
-#         def clasificar_row(row):
-#             reg = _build_registro(row, cols_list)
-#             k = _key(reg)
-
-#             if k in cache:
-#                 return cache[k]
+#             payload = {
+#                 "Tareas": tareas_para_ia,
+#                 "Registros": registros
+#             }
 
 #             try:
-#                 etiqueta = fn_ia({"Criterios": criterios}, {"Registro": reg})
-#                 if isinstance(etiqueta, str):
-#                     etiqueta = etiqueta.strip()
-#             except Exception:
-#                 etiqueta = on_error
+#                 respuesta = fn_ia(payload)
+#             except Exception as e:
+#                 print("Error IA:", e)
+#                 continue
 
-#             cache[k] = etiqueta
-#             return etiqueta
+#             resultados = respuesta.get("Resultados", {})
+#             for colname, lista_items in resultados.items():
+#                 for item in lista_items:
+#                     rid = item.get("id", item.get("idx"))
+#                     val = item.get("resultado", item.get("etiqueta"))
+#                     if rid in df_out.index:
+#                         df_out.at[rid, colname] = val
 
-#         # ---------------------------------------------------------
-#         # 🟦 Crear o reemplazar la columna según replace_existing
-#         # ---------------------------------------------------------
-#         if (not replace_existing) and (nueva_columna in out.columns):
-#             raise ValueError(
-#                 f"La columna '{nueva_columna}' ya existe. "
-#                 f"Activa replace_existing=True para reemplazarla."
-#             )
+#     return df_out
 
-#         out[nueva_columna] = out.apply(clasificar_row, axis=1)
-
-#     return out
 
 # ----------------------------
 # 7) Exportar a HTML con saltos de página y data URIs.
@@ -1325,275 +1026,6 @@ def exportar_output_a_html(
             return html_final
         raise e
 
-
-import re
-from bs4 import BeautifulSoup
-
-def mejorar_html_informe(html_raw: str) -> str:
-    """
-    Toma el HTML generado por informe_final y:
-    - Detecta portada
-    - Identifica títulos principales y secundarios
-    - Mejora tablas
-    - Inserta CSS corporativo
-    - Devuelve HTML final listo para exportar o PDF
-    """
-
-    # ============================================================
-    # 1. Insertar CSS CORPORATIVO
-    # ============================================================
-    CSS = """
-    <style>
-      :root{
-        --doc-max: 820px;
-        --font: -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Noto Sans";
-        --text: #1e2329;
-        --muted:#667085;
-        --accent:#25347a;
-        --accent-2:#58b12e;
-        --bg:#ffffff;
-        --border:#e1e4e8;
-      }
-      *{ box-sizing:border-box; }
-      html,body{ margin:0; padding:0; background:var(--bg); color:var(--text); }
-
-      body{
-        font-family:var(--font);
-        line-height:1.65;
-      }
-
-      .portada{
-        text-align:center;
-        padding:90px 40px 120px;
-        border-bottom:6px solid var(--accent);
-        margin-bottom:40px;
-      }
-      .portada h1{ font-size:34px; color:var(--accent); margin-bottom:12px; }
-      .portada h2{ font-size:22px; margin:0; color:var(--muted); }
-      .portada .empresa{ margin-top:25px; font-size:18px; font-weight:600; }
-
-      main{
-        max-width:var(--doc-max);
-        margin: 0 auto 60px;
-        padding: 0 24px;
-        font-size:15.5px;
-      }
-
-      p{ margin:12px 0; text-align:justify; }
-
-      h1{
-        color:var(--accent);
-        font-size:28px;
-        font-weight:700;
-        border-bottom:3px solid var(--accent-2);
-        padding-bottom:6px;
-        margin-top:40px;
-      }
-
-      h2{
-        color:var(--accent);
-        font-size:23px;
-        margin-top:34px;
-        font-weight:600;
-      }
-
-      h3{
-        font-size:18px;
-        margin-top:28px;
-        font-weight:600;
-        color:#2d3440;
-      }
-      h4{
-        background:#eef3ff;
-        padding:6px 10px;
-        border-left:4px solid var(--accent);
-        font-size:16px;
-      }
-
-      table{
-        width:100%;
-        border-collapse:collapse;
-        margin:22px 0;
-        font-size:14px;
-      }
-      th{
-        background:#f0f3f9;
-        font-weight:700;
-        border-bottom:2px solid var(--accent);
-        padding:10px;
-      }
-      td{
-        padding:8px 10px;
-        border-bottom:1px solid var(--border);
-      }
-      tbody tr:nth-child(odd){ background:#fafbff; }
-
-      .tabla-destacada{
-        border:2px solid var(--accent);
-      }
-
-      .figura{
-        text-align:center;
-        margin:20px auto;
-      }
-      .figura img{
-        max-width:60%;
-        display:block;
-        margin:0 auto;
-      }
-      .figura .caption{
-        font-size:13px;
-        color:var(--muted);
-        margin-top:6px;
-      }
-
-      .page-break{
-        page-break-before:always;
-        margin-top:40px;
-      }
-    </style>
-    """
-
-    # Insertar CSS al comienzo del HTML
-    html_raw = CSS + html_raw
-
-    # ============================================================
-    # 2. Parsear con BeautifulSoup
-    # ============================================================
-    soup = BeautifulSoup(html_raw, "html.parser")
-
-    # ============================================================
-    # 3. DETECTAR TÍTULOS AUTOMÁTICAMENTE
-    # ============================================================
-
-    patrones_h1 = re.compile(r"^\s*\*?\s*\d+\.\s+.+", re.IGNORECASE)
-    patrones_h2 = re.compile(r"^\s*\d+\.\d+\s+.+", re.IGNORECASE)
-
-    for p in soup.find_all("p"):
-        txt = p.get_text(strip=True)
-
-        # Título principal (1. INTRODUCCIÓN)
-        if patrones_h1.match(txt):
-            new_tag = soup.new_tag("h1")
-            new_tag.string = txt
-            p.replace_with(new_tag)
-
-        # Subtítulo (3.2 Objetivos específicos)
-        elif patrones_h2.match(txt):
-            new_tag = soup.new_tag("h2")
-            new_tag.string = txt
-            p.replace_with(new_tag)
-
-        # Títulos escritos en MAYÚSCULAS
-        elif txt.isupper() and len(txt) > 8:
-            new_tag = soup.new_tag("h2")
-            new_tag.string = txt
-            p.replace_with(new_tag)
-
-    # ============================================================
-    # 4. DETECTAR Y MEJORAR TABLAS
-    # ============================================================
-    for table in soup.find_all("table"):
-        classes = table.get("class", [])
-        if "tabla-destacada" not in classes:
-            classes.append("tabla-destacada")
-        table["class"] = classes
-
-    # ============================================================
-    # 5. DETECTAR Y CONSTRUIR PORTADA
-    # ============================================================
-    # La portada será el contenido previo al primer <h1>
-    portada_items = []
-    for elem in soup.body.contents:
-        if elem.name == "h1":
-            break
-        portada_items.append(elem)
-
-    if portada_items:
-        portada_div = soup.new_tag("div", **{"class": "portada"})
-        for e in portada_items:
-            portada_div.append(e.extract())
-
-        soup.body.insert(0, portada_div)
-
-    return str(soup)
-
-
-from bs4 import BeautifulSoup
-import re
-
-def estructurar_documento(html: str) -> str:
-    soup = BeautifulSoup(html, "html.parser")
-    main = soup.find("main")
-    if not main:
-        return html
-
-    # ============================================================
-    # 1. DETECTAR PORTADA (primeros párrafos que no son contenido)
-    # ============================================================
-    portada_items = []
-    contenido_items = []
-    
-    portada_keywords = [
-        "diagnostico", "evaluaciones", "empresa", "resultado",
-        "rango de fechas", "institución", "cobertura"
-    ]
-
-    def es_portada(p):
-        txt = p.get_text().strip().lower()
-        return any(k in txt for k in portada_keywords)
-
-    for p in main.find_all("p", recursive=False):
-        if es_portada(p):
-            portada_items.append(p)
-        else:
-            contenido_items.append(p)
-
-    # Envolver portada en una sección
-    if portada_items:
-        portada_section = soup.new_tag("section", **{"class": "portada"})
-        for p in portada_items:
-            portada_section.append(p)
-        main.insert(0, portada_section)
-
-    # ====================================================================
-    # 2. DETECTAR TABLA DE CONTENIDO (TOC)
-    # ====================================================================
-    toc_section = None
-    for p in main.find_all("p"):
-        if "contenido" in p.get_text().lower():
-            toc_section = p
-            break
-
-    if toc_section:
-        toc_section["class"] = "tabla-contenido"
-        # Aquí podrías extender para extraer los ítems
-    # ====================================================================
-    # 3. DETECTAR TÍTULOS “FALSOS” EN <p> Y CONVERTIRLOS A <h2> O <h3>
-    # ====================================================================
-    
-    patron_titulo = re.compile(r"""^(
-        \d+(\.\d+)*\s+.+       |   # Títulos tipo 8.1 Pirámide
-        [A-ZÁÉÍÓÚÑ ]{5,}           # Texto TODO EN MAYÚSCULA
-    )$""", re.VERBOSE)
-
-    for p in main.find_all("p"):
-        txt = p.get_text().strip()
-
-        # identificar títulos reales
-        if patron_titulo.match(txt):
-            new_h = soup.new_tag("h2")
-            new_h.string = txt
-            p.replace_with(new_h)
-
-    # ================================================================
-    # 4. DEVOLVER HTML MODIFICADO
-    # ================================================================
-    return str(soup)
-
-
-
-#-----------------------------
 
 def columnas_a_texto(df: pd.DataFrame, col1: str, col2: str, *, 
                      sep: str = "\n\n", dropna: bool = True, strip: bool = True) -> str:

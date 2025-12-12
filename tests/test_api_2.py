@@ -1,5 +1,5 @@
 
-from Colmedicos.io_utils_remaster import process_ia_blocks, process_data_blocks, process_plot_blocks, _render_vars_text, parse_plot_blocks, parse_ia_blocks, parse_data_blocks, exportar_output_a_html, _fig_to_data_uri, _format_result_plain, columnas_a_texto, unir_idx_params_con_span_json, aplicar_multiples_columnas_gpt5, unpivot_df, dividir_columna_en_dos, procesar_codigos_cie10, unir_dataframes, unir_idx_params_con_span_json_data,expand_json_column
+from Colmedicos.io_utils_remaster import process_ia_blocks, process_data_blocks, process_plot_blocks, _render_vars_text, exportar_output_a_html, _fig_to_data_uri, _format_result_plain, columnas_a_texto, aplicar_multiples_columnas_gpt5, unpivot_df, dividir_columna_en_dos, procesar_codigos_cie10, unir_dataframes, expand_json_column
 import pandas as pd
 from Colmedicos.ia import ask_gpt5, operaciones_gpt5, graficos_gpt5,portada_gpt5, columns_batch_gpt5
 from Colmedicos.io_utils import aplicar_plot_por_tipo_desde_output, aplicar_ia_por_tipo, generar_output, mostrar_html
@@ -15,13 +15,12 @@ ruta_archivo = r"C:\Users\EstebanEscuderoPuert\Downloads\Plantilla.xlsx"
 df = pd.read_excel(ruta_archivo)
 
 ctx = {
-    "nombre_cliente": "Copaltas S.A.S.",
-    "nit_cliente": "901.245.435-1",
-    "fecha_inicio": "2025-01-01",
-    "fecha_fin": "2025-01-31",
+    "nombre_cliente": "TCC S.A.S.",
+    "nit_cliente": "860016640-4",
+    "fecha_inicio": "2025-05-01",
+    "fecha_fin": "2025-09-31",
     "numero_personas": 51,
 }
-
 
 # Ruta del archivo Excel
 ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\MatrizInformesDx - TCC (1).xlsx"
@@ -258,6 +257,13 @@ tareas = [
     },
       "registro_cols": "ocupacion",
       "nueva_columna": "categoria_cargo"
+    },
+    {"criterios": {
+        "No": "Se usa si es un exfumador, está vacío o manifiesta que no fuma",
+        "Si": "Se usa si manifiesta que fuma"
+      },
+      "registro_cols": "habitos_tabaquismo1",
+      "nueva_columna": "Fuma regularmente"
     }
     ]
 
@@ -268,7 +274,7 @@ renombres = {
     "lab_Resultado_global": "Resultado"
 }
 
-inf, meta = informe_final(df,
+inf, meta, df_datico = informe_final(df,
                           df_datos,
                           ctx,
                           tareas=tareas,
@@ -283,7 +289,6 @@ inf, meta = informe_final(df,
                           campos_a_extraer=campos,
                           renombrar_campos=renombres
                           )
-
 
 
 # # # # # Ruta del archivo Excel
@@ -321,8 +326,8 @@ print(meta)
 # valores = columns_batch_gpt5(criterios=tarea_u, registros=registros)
 # print(valores)
 
-# ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\MatrizInformesDx - TCC (1).xlsx"
-# df_otro = pd.read_excel(ruta_archivos)
+#ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\MatrizInformesDx - TCC (1).xlsx"
+#df_otro = pd.read_excel(ruta_archivos)
 # out = aplicar_multiples_columnas_gpt5(df_otro, tareas=tareas)
 # df_otro = procesar_codigos_cie10(out, columna_texto="obs_diagnostico")
 # df_otro = unir_dataframes(df_otro,df_maestro,col_df1="obs_diagnostico",col_df2="Code")
@@ -344,16 +349,50 @@ print(meta)
 # df_otro = pd.read_excel(ruta_archivos)
 
 # texto_completo = columnas_a_texto(df,"Titulo","Contenido")
+
 # out2 = process_data_blocks(df_otro,texto_completo)
-# out1 = operaciones_gpt5(df_otro,texto_completo)
+# out2 = process_ia_blocks(out2)
+# out2 = process_plot_blocks(df_otro,out2)
 
-# import json
+# from Colmedicos.io_utils_remaster import extraer_data_blocks, aplicar_operaciones_en_texto
+# out = extraer_data_blocks(texto_completo)
 
-# with open(r"C:\Users\EstebanEscuderoPuert\Downloads\output_.txt", "w", encoding="utf-8") as f:
-#     json.dump(out1, f, indent=4, ensure_ascii=False)
+# out = operaciones_gpt5(df_datos, out)
+# print(out)
+# from typing import Any, Dict, List, Tuple, Union, Optional, Callable
+# resultados_ops: List[
+#     Tuple[int, Dict[str, Any], Union[Tuple[int, int], None], str]
+# ] = []
+
+# for item in out:
+#     if isinstance(item, dict) and "params" in item:
+#         idx = item.get("idx")
+#         params = item.get("params")
+#         span = item.get("span")
+
+#         try:
+#             resultado = ejecutar_operaciones_condicionales(df_otro, params)
+#             resultado_fmt = _format_result_plain(resultado)
+#             resultados_ops.append((idx, params, span, resultado_fmt))
+#         except Exception as e:
+#             # Mantener trazabilidad sin romper el tipo (resultado como string legible)
+#             error_txt = f"[error:{str(e)}]"
+#             resultados_ops.append((idx, params, span, error_txt))
+
+# out2 = aplicar_operaciones_en_texto(texto_completo, resultados_ops, formato="html")
+#print(out2)
 
 # with open(r"C:\Users\EstebanEscuderoPuert\Downloads\output_1.txt", "w", encoding="utf-8") as f:
 #     f.write(out2)
+# out1 = operaciones_gpt5(df_otro,texto_completo)
+
+import json
+
+#with open(r"C:\Users\EstebanEscuderoPuert\Downloads\output_.txt", "w", encoding="utf-8") as f:
+#    json.dump(out2, f, indent=4, ensure_ascii=False)
+
+#with open(r"C:\Users\EstebanEscuderoPuert\Downloads\output_1.txt", "w", encoding="utf-8") as f:
+#    f.write(out2)
 # print(out1)
 
 

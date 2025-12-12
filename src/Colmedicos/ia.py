@@ -3,32 +3,32 @@
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
-from pandas.api.types import is_numeric_dtype, is_datetime64_any_dtype
-from typing import List, Dict, Any, Tuple, Optional
-import base64
-from io import BytesIO
-from matplotlib._pylab_helpers import Gcf
-import operator
-import os
-from openai import OpenAI
+from typing import List, Dict, Any
 import openai
 import time
 import json
-from pathlib import Path
-import html
-import re
-from typing import Callable, Literal
-import webbrowser
-import tempfile
 import plotly.express as px
 from Colmedicos.registry import register
 from Colmedicos.config import OPENAI_API_KEY
 
 API_KEY = "API"
-instruccion = "Todo lo que no esté entre los signos ++, redactalo exactamente igual, lo que si esté, sigue las instrucciones y lo reemplazas por lo que haya originalmente entre ++, adicionalmente el texto literal quitale caracteres como: *, por nada del mundo modifiques el texto que encuentres entre el caracter numeral: # y saltos de línea innecesarios.\n\n"
-rol = """Eres un médico especialista en Salud Ocupacional en Colombia.
-Generas informes claros, técnicos y coherentes para empresas de todos los sectores económicos.
+instruccion = "Eres un médico especialista en Salud Ocupacional en Colombia. Especialista en hablar sobre datos estádisticos y relacionarlos con información de salud ocupacional. Tu trabajo es generar análisis basados en instrucciones médicas en español, devolviendo EXCLUSIVAMENTE un arreglo JSON válido UTF-8 (sin texto adicional, sin comentarios, sin fences). La salida se usará directamente en un generador de informes; si la salida no es JSON válido, el proceso falla."
+rol = """Generas informes claros, técnicos y coherentes para empresas de todos los sectores económicos.
 Tu informe no se limita a describir datos: interpreta, contextualiza, correlaciona y recomienda, siempre con enfoque preventivo.
+
+Información de entrada:
+A partir de un parametro de entrada denominado INSTRUCCIÓN, Recibirás siempre uno o varios objetos bajo la siguiente estructura JSON:
+  [
+  {"idx": 1, "prompt": "texto", span: [start,end]},
+  {"idx": 2, "prompt": "texto", span: [start,end]},
+  ...
+]
+- Cada objeto contiene una instrucción en español en el campo "prompt".
+- El parámetro span representa el rango exacto de posiciones dentro del texto original (conteo de caracteres) desde el cual se extrajo la instrucción o descripción que dio origen al informe.
+- Debes devolver un arreglo JSON con un objeto por cada instrucción, en el mismo orden y con el mismo idx.
+- Cada objeto de salida tendrá la forma:
+  {"idx": <id>, "params": "texto del informe", span: [start,end]}
+
 1. Reglas estrictas de redacción y normativa
 ✔ Cumplimiento normativo
 •	Alinea todo el lenguaje a la Resolución 1843 de 2025 y normativa nacional.
@@ -51,18 +51,31 @@ o	“Debe reubicarse…”
 •	Conexión lógica entre secciones.
 •	Lenguaje uniforme entre informes.
 •	Evita jergas y coloquialismos.
+Sigue instrucciones al pie de la letra.
+Donde te pidan dejar solo la cantidad, hazlo sin agregar texto adicional.
+
+SALIDA JSON ESPERADA
+- Devuelve exclusivamente un arreglo JSON válido UTF-8 con la estructura:
+[
+  {"idx": <id>, "params": "texto del informe", span: [start,end]},
+  ...
+]
+- No agregues texto adicional, explicaciones ni comentarios.
+
+Con base a la siguiente INSTRUCCIÓN: {INSTRUCCION}
+ devuelve el json con los analisis solicitados.
 """
 client = openai.OpenAI(api_key=API_KEY)
   
 @register("ask_gpt5")
 def ask_gpt5(pregunta):
     """Envía un prompt y devuelve la respuesta de GPT-5."""
-    time.sleep(3)
+    instruc = json.dumps(pregunta, ensure_ascii=False)
     respuesta = client.chat.completions.create(
-        model="gpt-5",  # 👈 Aquí usas GPT-5 directamente
+        model="gpt-4.1",  # 👈 Aquí usas GPT-5 directamente
         messages=[
             {"role": "system", "content": rol},
-            {"role": "user", "content": instruccion + pregunta}
+            {"role": "user", "content": instruccion + instruc}
         ]
     )
 
@@ -94,8 +107,8 @@ Modo BATCH
 Contenido: un arreglo JSON de objetos:
 
 [
-  {"idx": 1, "prompt": "texto"},
-  {"idx": 2, "prompt": "texto"},
+  {"idx": 1, "prompt": "texto", span: [start,end]},
+  {"idx": 2, "prompt": "texto", span: [start,end]},
   ...
 ]
 
@@ -103,7 +116,7 @@ Contenido: un arreglo JSON de objetos:
 Debes devolver un arreglo en el mismo orden, con la forma:
 
 [
-  {"idx": <id>, "params": { ...objeto del esquema... }},
+  {"idx": <id>, "params": { ...objeto del esquema... }, span: [start,end]},
   ...
 ]
 
@@ -224,8 +237,8 @@ L. Multi-gráficas en SINGLE
 Si hay varias secciones # ... #, produce:
 
 [
-  {"idx": 1, "params": {...}},
-  {"idx": 2, "params": {...}},
+  {"idx": 1, "params": {...}, span: [start,end]},
+  {"idx": 2, "params": {...}, span: [start,end]},
   ...
 ]
 
@@ -288,6 +301,11 @@ J. Si de forma explícita se pide ocultar las medidas originales en la gráfica 
     - Si se especifica false, las medidas originales se mostrarán junto con las medidas adicionales.
     - Por defecto, si no se especifica, se asume false (mostrar medidas originales).
 
+K. Devuelve el span [start,end] exacto de cada instrucción en el texto original.
+    - start: posición del primer carácter.
+    - end: posición inmediatamente posterior al último carácter.
+    - no inventes span, sólo devuelve el valor correspondiente al idx de cada instrucción.
+  
 
  ESQUEMA DE SALIDA (params)
  - Devolver exclusivamente los parametros indicados en este esquema, no devolver nada por fuera de esta estructura, no inventes columnas a menos que estén explicitamente indicadas en {COLUMNAS_JSON}.
@@ -324,7 +342,7 @@ J. Si de forma explícita se pide ocultar las medidas originales en la gráfica 
 Para SINGLE con varias gráficas o BATCH, siempre devolver:
 
 [
-  {"idx": <id_o_orden>, "params": {...}},
+  {"idx": <id_o_orden>, "params": {...}, span: [start,end]},
   ...
 ]
 
@@ -439,8 +457,8 @@ Salida:
 Si hubiera varias instrucciones:
 
 [
-  {"idx": 1, "params": {...}},
-  {"idx": 2, "params": {...}},
+  {"idx": 1, "params": {...}, span: [start,end]},
+  {"idx": 2, "params": {...}, span: [start,end]},
 ]
 
 FIN. SOLO JSON.
@@ -481,9 +499,9 @@ def graficos_gpt5(df, pregunta: Union[str, List[Dict[str, Any]]]) -> Union[Dict[
     """
     columnas = df.columns.tolist()
     payload_cols = json.dumps(columnas, ensure_ascii=False)
-
-    subprompt = _MSJ_GRAFO_V2.replace("{COLUMNAS_JSON}", payload_cols).replace("{INSTRUCCION}", str(pregunta))
-    time.sleep(6)
+    instruccion_tipo = json.dumps(pregunta, ensure_ascii=False)
+    subprompt = _MSJ_GRAFO_V2.replace("{COLUMNAS_JSON}", payload_cols).replace("{INSTRUCCION}", str(instruccion_tipo))
+    time.sleep(1)
     respuesta = client.chat.completions.create(
     model="gpt-5",  # 👈 Aquí usas GPT-5 directamente
     messages=[
@@ -499,70 +517,46 @@ def graficos_gpt5(df, pregunta: Union[str, List[Dict[str, Any]]]) -> Union[Dict[
 
 
 MSJ_OPS = """
-Eres un analista de datos. A partir de una o varias instrucciones en español (cada una delimitada por || ... ||) y una lista de columnas de un DataFrame de pandas,
+Eres un analista de datos. A partir de una o varias instrucciones en español y una lista de columnas de un DataFrame de pandas,
 debes devolver EXCLUSIVAMENTE un arreglo JSON válido con especificaciones de MÚLTIPLES operaciones a ejecutar sobre el DataFrame.
-Cada instrucción delimitada por || corresponde a un objeto dentro del arreglo final.
+Cada instrucción se entregará em un arreglo tipo json como se muestra a continuación y cada objeto debe interpretarse de forma independiente.
 
-El JSON debe ser un arreglo con esta forma:
+ENTRADA JSON
+{INSTRUCCION}
+El JSON debe tendrá esta forma:
 
 [
-  {"idx": 1, "params": { ... }},
-  {"idx": 2, "params": { ... }},
+  {"idx": 1, "prompt": { ... }, span: [start,end]},
+  {"idx": 2, "prompt": { ... }, span: [start,end]},
   ...
 ]
 
-Dentro de cada `params`, usa exactamente la siguiente estructura (idéntica a la del esquema de salida original).
-
----
-## FORMATO DE CADA ELEMENTO (params)
-
-{
-  "operations": [
-    {
-      "op": "sum | count | avg | min | max | distinct_count | distinct_sum | ratio | weighted_avg",
-      "alias": "string",
-
-      "column": "string|null",
-      "conditions": [["col","op","valor"], ...],
-      "conditions_logic": "AND|OR",
-      "condition_groups": [
-        { "conditions": [["col","op","valor"], ...], "logic": "AND|OR" }
-      ],
-
-      "dedupe_by": ["colA","colB"],         // opcional
-      "count_nulls": true|false,            // solo "count"
-
-      "numerator":   { "column":"string", "conditions":[["col","op","valor"]], "conditions_logic":"AND|OR" },
-      "denominator": { "column":"string", "conditions":[["col","op","valor"]], "conditions_logic":"AND|OR" },
-      "weights": "string",                  // weighted_avg
-      "safe_div0": number|null
-    }
-  ],
-  "group_by": null | "string" | ["string", ...],
-  "needs_disambiguation": false,
-  "candidates": { "columns": [], "group_by": [], "by_operation": [] }
-}
+Interpreta cada instrucción y desglósala en una o más operaciones.
+Usa las columnas provistas globalmente: {COLUMNAS_JSON}.
 
 ---
 ## INSTRUCCIONES DE INTERPRETACIÓN
 
-1. Cada bloque || ... || representa una instrucción independiente y debe generar un objeto:
-   {"idx": <número>, "params": { ...estructura anterior... }}
-Nota: Unicamente procesa el texto entre || ... || todo el texto fuera de este debe ser ignorado.
-      - No te saltes ningún bloque ||...|| que esté bien formado.
-      - No agregues bloques adicionales que no estén en la entrada.
+1. Cada bloque "prompt" representa una instrucción independiente y debe generar un objeto:
+   {"idx": <número>, "prompt": { ...estructura anterior... }}
+Nota: Unicamente procesa el texto dentro del parametro "prompt".
+      - No te saltes ningún objeto que esté bien formado.
+      - No agregues objetos adicionales que no estén en la entrada.
       - No modifiques el orden de los bloques.
 
-2. El índice `idx` debe incrementarse secuencialmente (1, 2, 3, ...).
+2. El índice `idx` debes almacenarlos secuencialmente (1, 2, 3, ...).
 
-3. En modo SINGLE (un texto con varias instrucciones ||...||):
-   devuelve un arreglo con todos los objetos en orden de aparición.
+3. En modo SINGLE (un texto con varias instrucciones o parametros):
+   devuelve un arreglo con todos los objetos en orden de aparición y creales un `idx` secuencial (1, 2, 3, ...).
 
-4. En modo BATCH (si la entrada ya es un arreglo con prompts):
+4. En modo BATCH (si la entrada ya es un arreglo con prompts e ids):
    conserva el mismo `idx` y orden de los elementos.
 
-5. No repitas la lista de columnas dentro de cada objeto.  
-   Usa las columnas provistas globalmente: {COLUMNAS_JSON}.
+5. Usa las columnas del DataFrame provistas en {COLUMNAS_JSON} para mapear nombres.
+  - Interpreta nombres con coincidencia case-insensitive y acentos-insensitive.
+    - Si hay ambigüedad o no existe, deja el campo en null y marca `"needs_disambiguation": true`, proponiendo alternativas en `"candidates"`.
+  -No repitas la lista de columnas dentro de cada objeto.
+  - Usa unicamente las columnas que estén en {COLUMNAS_JSON}. No inventes columnas nuevas. 
 
 6. Todos los valores nulos, verdaderos y falsos deben expresarse como JSON válido:
    - null → null  
@@ -606,7 +600,52 @@ Nota: Unicamente procesa el texto entre || ... || todo el texto fuera de este de
      - Para `"in"/"not in"` el valor debe ser **lista**.
    - Rangos del tipo “18.5 ≤ IMC ≤ 24.9” se expresan como **dos** condiciones en el mismo bloque.
 
+16. Devuelve el span [start,end] exacto de cada instrucción en el texto original.
+  - start: posición del primer carácter.
+  - end: posición inmediatamente posterior al último carácter.
+
 ---
+
+Dentro de cada `params`, usa exactamente la siguiente estructura (idéntica a la del esquema de salida original).
+
+---
+
+SALIDA JSON
+Devuelve siempre para un conjunto de instrucciones:
+[
+  {"idx": <número>, "params": { ...estructura... }, span: [start,end]},
+  ...
+]
+
+## FORMATO DE CADA ELEMENTO (params)
+
+{
+  "operations": [
+    {
+      "op": "sum | count | avg | min | max | distinct_count | distinct_sum | ratio | weighted_avg",
+      "alias": "string",
+
+      "column": "string|null",
+      "conditions": [["col","op","valor"], ...],
+      "conditions_logic": "AND|OR",
+      "condition_groups": [
+        { "conditions": [["col","op","valor"], ...], "logic": "AND|OR" }
+      ],
+
+      "dedupe_by": ["colA","colB"],         // opcional
+      "count_nulls": true|false,            // solo "count"
+
+      "numerator":   { "column":"string", "conditions":[["col","op","valor"]], "conditions_logic":"AND|OR" },
+      "denominator": { "column":"string", "conditions":[["col","op","valor"]], "conditions_logic":"AND|OR" },
+      "weights": "string",                  // weighted_avg
+      "safe_div0": number|null
+    }
+  ],
+  "group_by": null | "string" | ["string", ...],
+  "needs_disambiguation": false,
+  "candidates": { "columns": [], "group_by": [], "by_operation": [] }
+}
+
 ## EJEMPLO MULTIPLE
 
 Entrada:
@@ -638,20 +677,17 @@ Salida esperada:
 
 FIN. SOLO JSON.
 
-
 Ejecución: Con base en la siguiente {INSTRUCCION} y las columnas {COLUMNAS_JSON}, interpreta y devuelve los parámetros técnicos en JSON.
 """
 
 @register("operaciones_gpt5")
 def operaciones_gpt5(df, pregunta):
     """Envía un prompt y devuelve la respuesta de GPT-5."""
-    time.sleep(3)
-    
     # Extraer nombres de columnas
     columnas = df.columns.tolist()
     payload_cols = json.dumps(columnas, ensure_ascii=False)
-    subprompt = (MSJ_OPS.replace("{COLUMNAS_JSON}", payload_cols).replace("{INSTRUCCION}", str(pregunta)))
-    time.sleep(6)
+    instruccion = json.dumps(pregunta, ensure_ascii=False)
+    subprompt = (MSJ_OPS.replace("{COLUMNAS_JSON}", payload_cols).replace("{INSTRUCCION}", str(instruccion)))
     respuesta = client.chat.completions.create(
         model="gpt-5",  # 👈 Aquí usas GPT-5 directamente
         messages=[
@@ -707,85 +743,113 @@ def columns_gpt5(criterios, registro):
     texto_respuesta = respuesta.choices[0].message.content
     return texto_respuesta
 
-
 clasificador_batch = """
 Eres un clasificador determinista por reglas.
-Tu tarea es asignar UNA salida para cada registro recibido.
-La salida puede ser:
-  a) Una de las etiquetas definidas en los CRITERIOS (modo clasificación), o
-  b) Un valor numérico o de texto calculado según una regla (modo cálculo).
+Tu tarea es procesar VARIAS tareas de clasificación o cálculo en un solo lote.
+Cada tarea define:
+  - una columna de salida,
+  - un conjunto de criterios,
+  - y las columnas del registro que debe utilizar.
 
-Formato de entrada:
-  - Regitros: Recibe una estructura de registros de la siguiente forma:
-  {"Registros": [{"idx": 1, "registro": { ... }}, {"idx": 2, "registro": { ... }}, ...]}
-  - Criterios: Recibe una estructura de criterios de la siguiente forma:
-  {"Criterios": { "etiqueta1": "regla o cálculo", "etiqueta2": "regla o cálculo", ... }}
-REGLAS GENERALES
-1) Recibirás:
-   - CRITERIOS: diccionario cuyas claves pueden ser etiquetas o nombres de cálculos.
-   - REGISTROS: lista de objetos {id, registro}.
+Tu trabajo consiste en:
+  → Aplicar los criterios de cada tarea para TODOS los registros.
+  → Generar una salida por cada registro para cada tarea.
+  → Respetar estrictamente el orden de los registros.
+
+NUEVO FORMATO DE ENTRADA (PAYLOAD):
+Recibirás un JSON con dos claves principales: "Tareas" y "Registros" {payload}.
+  - "Tareas": lista de objetos. Cada objeto define:
+      - "columna": nombre de la columna de salida.  
+      - "criterios": diccionario cuyas claves son las etiquetas permitidas y los valores son las reglas o cálculos.
+      - "registro_cols": lista de nombres de columnas que el registro debe incluir.
+  - "Registros": lista de objetos. Cada objeto define:
+      - "idx": índice del registro (entero).
+      - "registro": objeto con los campos de una fila (incluye las columnas indicadas en "registro_cols" de las tareas).
+Recibirás un JSON con esta estructura:
+
+{
+  "Tareas": [
+    {
+      "columna": "NombreColumnaSalida",
+      "criterios": {
+          "Etiqueta1": "regla o cálculo",
+          "Etiqueta2": "regla o cálculo",
+          ...
+      },
+      "registro_cols": ["col1", "col2", ...]
+    },
+    ...
+  ],
+  "Registros": [
+    { "idx": 0, "registro": {...} },
+    { "idx": 1, "registro": {...} },
+    ...
+  ]
+}
+
+REGLAS GENERALES (se mantienen TODAS tus reglas originales):
+
+1) Para cada tarea:
+   - Aplica su conjunto de CRITERIOS literalmente y en orden.
+   - Cada criterio puede ser:
+        a) una condición de clasificación, o
+        b) una instrucción de cálculo.
 
 2) Para cada registro:
-   a) Si el valor asociado a la clave del criterio describe una condición (“se clasifica si…”),
-      aplica las reglas literalmente, tal como en un clasificador determinista:
-        - AND / Y → todas deben cumplirse
-        - OR / O → al menos una
-        - NOT / NO → negación
-        - Comparación de texto: contiene, empieza, termina, igual
-        - Comparaciones numéricas o fechas (si vienen normalizadas)
-      Si se cumplen varias, gana el PRIMER criterio.
+   a) Si el criterio describe una condición (“se clasifica si…”):
+        - Usa AND/OR/NOT exactamente como estén escritos.
+        - Comparación de texto: contiene, empieza, termina, igual.
+        - Comparación numérica y de fechas si los datos lo permiten.
+        - Si varios criterios aplican, gana el PRIMERO.
 
-   b) Si el texto del criterio describe una instrucción de CÁLCULO
-      (“Calculo: …”, “Calcular …”, “Obtener …”, etc.):
-        - Debes ejecutar el cálculo EXACTAMENTE con los valores del registro.
-        - Ejemplos válidos:
-            “Calculo los años = fecha_hoy - fecha_ingreso en años”
-            “Calculo IMC = peso / (talla * talla)”
-            “Calculo antigüedad = fecha_actual - fecha_inicio en años”
-        - La salida puede ser un número entero, decimal o un string limpio.
-        - No agregues texto adicional.
+   b) Si el criterio describe un cálculo (“Calculo: …”, “Calcular …”):
+        - Ejecuta la fórmula EXACTA con los datos del registro.
+        - Si hay errores (división por cero, nulos, formato inválido),
+          devuelve "0".
+        - Si varios criterios aplican, gana el PRIMERO.
 
-   c) Si ningún criterio aplica, usa:
-        - el último criterio explícito que sea “resto/caso por defecto”, o
-        - si no existe, la ÚLTIMA clave del diccionario.
-   d) La salida para cada registro es UN SOLO valor: la etiqueta o el resultado del cálculo.
-   e) Para los cálculos, si hay error (división por cero, dato faltante, formato inválido), devuelve "0".
-   f) Para los cálculos puedes realizar cualquier tipo de operación matemática básica (+, -, *, /), uso de paréntesis, y funciones comunes (redondeo, truncar, fechas, etc.).
+   c) Si ningún criterio aplica:
+        - Usa el criterio de “resto/caso por defecto” si existe,
+        - Si no, usa la ÚLTIMA clave del diccionario de criterios.
+
+   d) La salida por cada registro ES UN SOLO VALOR.
 
 3) NO OMITAS REGISTROS.
 4) NO CAMBIES EL ORDEN DE LOS REGISTROS.
-5) NO AGREGUES EXPLICACIONES NI COMENTARIOS.
-6) Para cada registro debes generar exactamente UN Valor (ya sea etiqueta o cálculo), usando las reglas.
-7) No debes omitir ningún registro, bajo ninguna circunstancia.
-8) No debes reorganizar los registros, la salida debe respetar el orden de entrada.
-9) Revisa de forma detallada cada criterio y aplícalo estrictamente.
+5) NO AGREGUES texto adicional fuera del JSON.
+6) NO OMÍTAS tareas. Cada tarea debe generar su propia columna.
+7) Para cada tarea, genera un resultado por cada registro.
 
-FORMATO DE RESPUESTA:
-[
-  {"id": <id_registro>, "etiqueta": <valor>},
-  ...
-]
+FORMATO DE RESPUESTA ESPERADO (OBLIGATORIO):
 
-Eres estricto, literal y consistente.
+{
+  "Resultados": {
+    "NombreColumna1": [
+      {"id": <id_registro>, "etiqueta": <valor>},
+      ...
+    ],
+    "NombreColumna2": [
+      {"id": <id_registro>, "etiqueta": <valor>},
+      ...
+    ]
+  }
+}
 
-Con base en los siguientes criterios:
-{Criterios}
+Eres estricto, literal y completamente determinista.
 
-Y la siguiente lista de registros:
-{Registros}
-
-devuelve únicamente el JSON con las salidas procesadas.
+con base en el siguiente payload {payload}, devuelve los resultados en el formato indicado.
+No expliques nada. Devuelve únicamente el JSON.
 """
 
+
 @register("columns_batch_gpt5")
-def columns_batch_gpt5(criterios, registros):
+def columns_batch_gpt5(payload):
     """Envía un prompt y devuelve la respuesta de GPT-5."""
-    time.sleep(1)
     respuesta = client.chat.completions.create(
         model="gpt-4.1-mini",  # 👈 Aquí usas GPT-5 directamente
         messages=[
             {"role": "system", "content": "Eres un asistente preciso y coherente con instrucciones de análisis de texto, especificamente hablando de temas relacionados con salud ocupacional."},
-            {"role": "user", "content": clasificador_batch.replace("{Criterios}", str(criterios['Criterios'])).replace("{Registros}", str(registros['Registros']))}
+            {"role": "user", "content": clasificador_batch.replace("{payload}", str(payload))}
         ]
     )
 
@@ -799,9 +863,9 @@ def columns_batch_gpt5(criterios, registros):
 
 
 AG_P = """Eres un agente experto en documentación de salud ocupacional.
-Tu tarea es, a partir de una sola cadena de texto que recibirás como entrada, construir una portada y una tabla de contenido en texto plano, siguiendo estrictamente estas reglas:
+Tu tarea es, a partir de una sola cadena de texto que recibirás como entrada, construir una portada y una tabla de contenido en texto plano y analiza si en el texto no hay información o datos, elimina el apendice completo, siguiendo estrictamente estas reglas:
 
-NO DEBES ANALIZAR CONTENIDO DEL TEXTO INTERNO.
+DEBES ANALIZAR CONTENIDO DEL TEXTO INTERNO para determinar si existe o no datos númericos, estadísticos o secciones específicas.
 NO DEBES GENERAR UNA SEGUNDA PORTADA.
 NO DEBES REPETIR NINGUNA SECCIÓN.
 Instrucciones:
@@ -813,6 +877,7 @@ Instrucciones:
 6. NO RESUMAS EL DOCUMENTO
 7. NO AGREGUES ANÁLISIS MÉDICO
 8. NO DUPLIQUES NADA
+9. Elimina el apéndice completo si no hay datos numéricos, estadísticos o secciones específicas en el texto de entrada.
 
 
 1. Formato de SALIDA (siempre texto plano, sin JSON)
@@ -845,14 +910,30 @@ Luego, varios saltos de línea y el título:
 
 y a continuación la tabla de contenido en el siguiente estilo:
 
-1 Introducción
-2 Marco legal
-3 Objetivos
-3.1 Objetivo general
-3.2 Objetivos específicos
-4 Características de la empresa
+Introducción
+Marco legal
+Objetivos
+Objetivo general
+Objetivos específicos
+Características de la empresa
+Metodología
+Materiales y métodos
+Resultados
+1 *PERFIL SOCIODEMOGRAFICO*
+1.1 *PIRAMIDE POBLACIONAL*
+1.2 *COMPOSICIÓN FAMILIAR*
+1.3 *ESTRATO SOCIOECONOMICO*
+1.4 *ESCOLARIDAD*
+2 *PERFIL HABITOS Y ESTILOS DE VIDA SALUDABLE Y DE RIESGO PARA LA SALUD*
+3 *PERFIL LABORAL*
+3.1 *CARGO*
+3.2 *ANTIGUEDAD EN LA EMPRESA*
+3.3 *ANTECEDENTE DE EXPOSICION LABORAL A FACTORES DE RIESGOS OCUPACIONALES*
+3.4 *EXPOSICION LABORAL ACTUAL*
+3.5 *ANTECEDENTES PATOLÓGICOS OCUPACIONALES*
+....
 
-Sigue este patrón de numeración:
+A. Sigue este patrón de numeración:
 
 Títulos de nivel 1 → 1, 2, 3, 4, etc.
 
@@ -863,6 +944,18 @@ Subtítulos de nivel 3 → 11.2.1, 11.2.2, etc.
 Usa una tabulación o varios espacios entre el número y el título.
 Los títulos deben ir entre *…* tal como en el ejemplo.
 
+B. Nunca enumerar las siguientes secciones pero incluyelas en la tabla de contenido:
+- Introducción
+- Marco legal
+- Objetivos
+- Objetivo general
+- Objetivos específicos
+- Características de la empresa
+- Metodología
+- Materiales y métodos
+
+C. identifica los títulos y subtítulos del texto de entrada y constrúyelos en la tabla de contenido siguiendo las reglas del punto A.
+D. Si los titulos ya tienen números, no los agregues, de lo contrario, numéralos siguiendo el patrón del punto A.
 2. Cómo detectar la información para la portada
 
 A partir del texto de entrada:
@@ -961,7 +1054,7 @@ La salida debe ser solo la portada y la tabla de contenido, sin comentarios adic
 
 No devuelvas JSON, ni listas, ni marcas de código.
 
-Instrucción final: Con base al {texto} devuelve la portada y la tabla de contenido siguiendo las reglas anteriores.
+Instrucción final: Con base al {texto} devuelve la portada y la tabla de contenido siguiendo las reglas anteriores, asi mismo enumera los titulos acorde con la tabla de contenido y elimina apendices que no tengan información.
 """
 
 rol1 = """Eres un agente experto en documentación de salud ocupacional.
@@ -974,7 +1067,7 @@ def portada_gpt5(texto):
     subprompt = AG_P.replace("{texto}", texto)
     time.sleep(3)
     respuesta = client.chat.completions.create(
-        model="gpt-5",  # 👈 Aquí usas GPT-5 directamente
+        model="gpt-4.1",  # 👈 Aquí usas GPT-5 directamente
         messages=[
             {"role": "system", "content": rol1},
             {"role": "user", "content": subprompt}
