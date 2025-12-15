@@ -401,109 +401,45 @@ def _to_numeric_series(s: pd.Series) -> pd.Series:
 def _to_datetime_series(s: pd.Series) -> pd.Series:
     return pd.to_datetime(s, errors='coerce', utc=False)
 
-
 def _coerce_for_op(series: pd.Series, op: str, val: Any):
     """
-    Usa coerciones cacheadas para acelerar evaluaciones repetidas.
     Devuelve (serie_convertida, val_convertido, tipo)
     tipo ∈ {'numeric','datetime','raw'}
     """
+    # Si ya es numérica
+    if np.issubdtype(series.dtype, np.number):
+        v = pd.to_numeric(val, errors='coerce') if op not in _SET_OPS else [
+            pd.to_numeric(x, errors='coerce') for x in (val if isinstance(val, (list, tuple, set)) else [val])
+        ]
+        return (series, v, 'numeric')
 
-    colname = series.name
-
-    # ---------- 1) CACHE PARA NUMÉRICOS ----------
-    if colname in _NUMERIC_COERCION_CACHE:
-        numeric_series = _NUMERIC_COERCION_CACHE[colname]
-    else:
-        # Intento de coerción numérica (solo se hace 1 vez por columna)
-        numeric_series = pd.to_numeric(
-            series.astype(str).str.replace(",", ".", regex=False),
-            errors="coerce"
-        )
-        _NUMERIC_COERCION_CACHE[colname] = numeric_series
-
-    if numeric_series.notna().mean() >= 0.5:
-        # column behaves like numeric
-        if op in {"in", "not in"}:
+    # Si parece fecha o el valor es fecha
+    try_dt_series = _to_datetime_series(series)
+    # Heurística: si al menos 50% convierte a datetime, lo tratamos como fecha
+    if try_dt_series.notna().mean() >= 0.5:
+        if op in _SET_OPS:
             vals = val if isinstance(val, (list, tuple, set)) else [val]
-            coerced_vals = [pd.to_numeric(str(v).replace(",", "."), errors="coerce") for v in vals]
+            v = [pd.to_datetime(x, errors='coerce', utc=False) for x in vals]
         else:
-            coerced_vals = pd.to_numeric(str(val).replace(",", "."), errors="coerce")
-        return numeric_series, coerced_vals, "numeric"
+            v = pd.to_datetime(val, errors='coerce', utc=False)
+        return (try_dt_series, v, 'datetime')
 
-    # ---------- 2) CACHE PARA FECHAS ----------
-    if colname in _DATETIME_COERCION_CACHE:
-        dt_series = _DATETIME_COERCION_CACHE[colname]
-    else:
-        dt_series = pd.to_datetime(series, errors="coerce", utc=False)
-        _DATETIME_COERCION_CACHE[colname] = dt_series
-
-    if dt_series.notna().mean() >= 0.5:
-        if op in {"in", "not in"}:
+    # Intento numérico si la serie es object pero con números como texto
+    try_num_series = _to_numeric_series(series)
+    if try_num_series.notna().mean() >= 0.5:
+        if op in _SET_OPS:
             vals = val if isinstance(val, (list, tuple, set)) else [val]
-            coerced_vals = [pd.to_datetime(v, errors="coerce", utc=False) for v in vals]
+            v = [pd.to_numeric(str(x).replace(',', '.'), errors='coerce') for x in vals]
         else:
-            coerced_vals = pd.to_datetime(val, errors="coerce", utc=False)
-        return dt_series, coerced_vals, "datetime"
+            v = pd.to_numeric(str(val).replace(',', '.'), errors='coerce')
+        return (try_num_series, v, 'numeric')
 
-    # ---------- 3) CACHE PARA STRINGS LIMPIOS ----------
-    if colname in _STRING_COERCION_CACHE:
-        str_series = _STRING_COERCION_CACHE[colname]
+    # Sin conversión: trabajar en bruto (strings)
+    if op in _SET_OPS:
+        v = list(val) if isinstance(val, (list, tuple, set)) else [val]
     else:
-        str_series = series.astype("string")
-        _STRING_COERCION_CACHE[colname] = str_series
-
-    # 'contains' y 'regex' usan strings sin convertir
-    if op in {"contains", "regex"}:
-        return str_series, val, "raw"
-
-    # para in / not in convertir lista a string
-    if op in {"in", "not in"}:
-        vals = val if isinstance(val, (list, tuple, set)) else [val]
-        return str_series, list(vals), "raw"
-
-    return str_series, val, "raw"
-
-
-# def _coerce_for_op(series: pd.Series, op: str, val: Any):
-#     """
-#     Devuelve (serie_convertida, val_convertido, tipo)
-#     tipo ∈ {'numeric','datetime','raw'}
-#     """
-#     # Si ya es numérica
-#     if np.issubdtype(series.dtype, np.number):
-#         v = pd.to_numeric(val, errors='coerce') if op not in _SET_OPS else [
-#             pd.to_numeric(x, errors='coerce') for x in (val if isinstance(val, (list, tuple, set)) else [val])
-#         ]
-#         return (series, v, 'numeric')
-
-#     # Si parece fecha o el valor es fecha
-#     try_dt_series = _to_datetime_series(series)
-#     # Heurística: si al menos 50% convierte a datetime, lo tratamos como fecha
-#     if try_dt_series.notna().mean() >= 0.5:
-#         if op in _SET_OPS:
-#             vals = val if isinstance(val, (list, tuple, set)) else [val]
-#             v = [pd.to_datetime(x, errors='coerce', utc=False) for x in vals]
-#         else:
-#             v = pd.to_datetime(val, errors='coerce', utc=False)
-#         return (try_dt_series, v, 'datetime')
-
-#     # Intento numérico si la serie es object pero con números como texto
-#     try_num_series = _to_numeric_series(series)
-#     if try_num_series.notna().mean() >= 0.5:
-#         if op in _SET_OPS:
-#             vals = val if isinstance(val, (list, tuple, set)) else [val]
-#             v = [pd.to_numeric(str(x).replace(',', '.'), errors='coerce') for x in vals]
-#         else:
-#             v = pd.to_numeric(str(val).replace(',', '.'), errors='coerce')
-#         return (try_num_series, v, 'numeric')
-
-#     # Sin conversión: trabajar en bruto (strings)
-#     if op in _SET_OPS:
-#         v = list(val) if isinstance(val, (list, tuple, set)) else [val]
-#     else:
-#         v = val
-#     return (series.astype(str), v, 'raw')
+        v = val
+    return (series.astype(str), v, 'raw')
 
 def _apply_op(series: pd.Series, op: str, val: Any) -> pd.Series:
     if op == 'in':
@@ -686,6 +622,21 @@ def _metric_on_series(
     raise ValueError(f"Operación no soportada: {op}")
 
 
+def normalizar_columnas(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Limpia espacios, unicode invisibles y normaliza nombres
+    sin alterar la lógica del dataset.
+    """
+    def clean(col):
+        if isinstance(col, str):
+            col = col.replace("\xa0", " ")  # NBSP → espacio normal
+            col = col.strip()
+        return col
+
+    df = df.rename(columns={c: clean(c) for c in df.columns})
+    return df
+
+
 def ejecutar_operaciones_condicionales(
     df: pd.DataFrame,
     spec: Union[Dict[str, Any], List[Dict[str, Any]]],
@@ -694,7 +645,7 @@ def ejecutar_operaciones_condicionales(
     Ejecuta operaciones condicionales sobre df.
 
     `spec` puede ser:
-      - dict con claves:
+      - dict con claves:    
             {
               "operations": [ ... ],
               "group_by": ["col1", "col2"] | "col"
@@ -703,7 +654,7 @@ def ejecutar_operaciones_condicionales(
             [ {...}, {...} ]
         (en este caso se asume que NO hay group_by)
     """
-
+    df = normalizar_columnas(df)
     # --- Normalización de spec ---
     if isinstance(spec, list):
         # spec ya es la lista de operaciones

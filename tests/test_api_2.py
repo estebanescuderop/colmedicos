@@ -12,7 +12,7 @@ otra_ruta = r"C:\Users\EstebanEscuderoPuert\Downloads\muestra_plantilla.xlsx"
 # Ruta del archivo Excel
 ruta_archivo = r"C:\Users\EstebanEscuderoPuert\Downloads\Plantilla.xlsx"
 # Lee el archivo Excel (por defecto lee la primera hoja)
-df = pd.read_excel(ruta_archivo)
+df = pd.read_excel(otra_ruta)
 
 ctx = {
     "nombre_cliente": "TCC S.A.S.",
@@ -23,7 +23,7 @@ ctx = {
 }
 
 # Ruta del archivo Excel
-ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\MatrizInformesDx - TCC (1).xlsx"
+ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\prueba 4.xlsx"
 df_datos = pd.read_excel(ruta_archivos)
 maes_cie10 = r"C:\Users\EstebanEscuderoPuert\Downloads\cie10_maestro_limpio.xlsx"
 df_maestro = pd.read_excel(maes_cie10)
@@ -123,7 +123,7 @@ tareas = [
 
     {
       "criterios": {
-        "No": "Se usa si no hay ningun valor",
+        "No": "Se usa si no hay ningun valor, manifiesta que no practica deporte o es exdeportista",
         "Si": "Si manifiesta periodicidad"
       },
       "registro_cols": "habitos_deportes1",
@@ -132,7 +132,7 @@ tareas = [
 
     {
       "criterios": {
-        "No": "Se usa si es un exbebedor o está vacío",
+        "No": "Se usa si es un exbebedor o está vacío o manifiesta que no bebe",
         "Si": "Se usa si manifiesta que bebe"
       },
       "registro_cols": "habitos_licor1",
@@ -278,7 +278,7 @@ inf, meta, df_datico = informe_final(df,
                           df_datos,
                           ctx,
                           tareas=tareas,
-                          salida_html=r"C:\Users\EstebanEscuderoPuert\Downloads\Informe pruebas colmedicos\informes\informe_prueba.html",
+                          salida_html=r"C:\Users\EstebanEscuderoPuert\Downloads\Informe pruebas colmedicos\informes\informe_prueba1.html",
                           aplicar_cie10=True,
                           aplicar_union=True, 
                           aplicar_expansion_json=True,
@@ -296,7 +296,7 @@ inf, meta, df_datico = informe_final(df,
 # # df_date = pd.read_excel(ruta_archivos)
 
 print(meta)
-
+df_datico.to_excel(r"C:\Users\EstebanEscuderoPuert\Downloads\output_.xlsx", index=False, engine="openpyxl")
 
 
 # out = aplicar_multiples_columnas_gpt5(df_date, tareas)
@@ -326,15 +326,15 @@ print(meta)
 # valores = columns_batch_gpt5(criterios=tarea_u, registros=registros)
 # print(valores)
 
-#ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\MatrizInformesDx - TCC (1).xlsx"
-#df_otro = pd.read_excel(ruta_archivos)
+# ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\MatrizInformesDx - TCC (1).xlsx"
+# df_otro = pd.read_excel(ruta_archivos)
 # out = aplicar_multiples_columnas_gpt5(df_otro, tareas=tareas)
 # df_otro = procesar_codigos_cie10(out, columna_texto="obs_diagnostico")
 # df_otro = unir_dataframes(df_otro,df_maestro,col_df1="obs_diagnostico",col_df2="Code")
 # df_otro = expand_json_column(df_otro,"laboratorios_incluidos",fields_to_extract=campos,rename_map=renombres)
 # #df_otro = unpivot_df(df_otro,columnas_unpivot=columnas)
 # #df_otro = dividir_columna_en_dos(df_otro,columna="variable",caracter_separador="-",nombre_col1="Tipo prueba",nombre_col2="Prueba", eliminar_original=True)
-# df_otro.to_excel(r"C:\Users\EstebanEscuderoPuert\Downloads\output_.xlsx", index=False, engine="openpyxl")
+#df_otro.to_excel(r"C:\Users\EstebanEscuderoPuert\Downloads\output_.xlsx", index=False, engine="openpyxl")
 # print(df_otro.head(10))
 
 #out.to_excel(r"C:\Users\EstebanEscuderoPuert\Downloads\output_.xlsx", index=False, engine="openpyxl")
@@ -350,21 +350,25 @@ print(meta)
 
 # texto_completo = columnas_a_texto(df,"Titulo","Contenido")
 
-# out2 = process_data_blocks(df_otro,texto_completo)
+#out2 = process_data_blocks(df_otro,texto_completo)
 # out2 = process_ia_blocks(out2)
 # out2 = process_plot_blocks(df_otro,out2)
 
 # from Colmedicos.io_utils_remaster import extraer_data_blocks, aplicar_operaciones_en_texto
 # out = extraer_data_blocks(texto_completo)
 
-# out = operaciones_gpt5(df_datos, out)
+# out2 = operaciones_gpt5(df_otro, out)
 # print(out)
+# print(out2)
+# for c in df_otro.columns:
+#     print(repr(c))
+
 # from typing import Any, Dict, List, Tuple, Union, Optional, Callable
 # resultados_ops: List[
 #     Tuple[int, Dict[str, Any], Union[Tuple[int, int], None], str]
 # ] = []
 
-# for item in out:
+# for item in out2:
 #     if isinstance(item, dict) and "params" in item:
 #         idx = item.get("idx")
 #         params = item.get("params")
@@ -378,7 +382,7 @@ print(meta)
 #             # Mantener trazabilidad sin romper el tipo (resultado como string legible)
 #             error_txt = f"[error:{str(e)}]"
 #             resultados_ops.append((idx, params, span, error_txt))
-
+# print(resultados_ops)
 # out2 = aplicar_operaciones_en_texto(texto_completo, resultados_ops, formato="html")
 #print(out2)
 

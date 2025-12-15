@@ -1037,6 +1037,8 @@ def graficar_tabla(
     # 👇 NUEVO PARAMETRO multiples métricas
     extra_measures: Optional[List[Dict[str, Any]]] = None,
     hide_main_measure=False, 
+    add_total_row = False,
+    add_total_column = False
 ) -> Tuple[plt.Figure, plt.Axes]:
 
     """
@@ -1217,6 +1219,24 @@ def graficar_tabla(
             )
         else:
             df_plot[percentage_colname] = np.nan
+    
+    if add_total_row:
+        numeric_cols = df_plot.select_dtypes(include=[np.number]).columns
+
+        if len(numeric_cols) > 0:
+            total_row = df_plot[numeric_cols].sum()
+            # la primera columna siempre es la etiqueta
+            first_col = df_plot.columns[0]
+            total_row[first_col] = "TOTAL"
+
+            # Convertimos a DataFrame para concatenar
+            total_df = pd.DataFrame([total_row])
+            df_plot = pd.concat([df_plot, total_df], ignore_index=True)
+    
+    if add_total_column:
+        numeric_cols = df_plot.select_dtypes(include=[np.number]).columns
+        if len(numeric_cols) > 0:
+            df_plot["TOTAL"] = df_plot[numeric_cols].sum(axis=1)
 
     # ---------- Formateo base ----------
     df_display = df_plot.copy()
@@ -1714,6 +1734,11 @@ def plot_from_params(df: pd.DataFrame, params: Dict[str, Any], *, show: bool = F
         # Nueva opción: ocultar la métrica principal
             hide_main_measure = p.get("hide_main_measure", False)
             common_kwargs["hide_main_measure"] = hide_main_measure
+        add_total_row = p.get("add_total_row", False)
+        add_total_column = p.get("add_total_column", False)
+        common_kwargs["add_total_row"] = add_total_row
+        common_kwargs["add_total_column"] = add_total_column
+
     # ---- Config específica de BARRAS / HORIZONTAL ----
     if func in (graficar_barras, graficar_barras_horizontal):
         legend_col = p.get("legend_col")

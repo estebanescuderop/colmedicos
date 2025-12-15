@@ -172,13 +172,9 @@ def aplicar_ia_en_texto(texto: str, resultados_ia, formato: str = "html") -> str
 
         # --- construir reemplazo ---
         if formato == "html":
-            rep = (
-                f'<div class="ia-bloque_{idx}">'
-                f'{resultado_ia}'
-                '</div>'
-)
+            rep = f'<span class="ia-bloque_{idx}">{resultado_ia}</span>'
         else:
-            rep = f"\n[IA bloque {idx}]\n{resultado_ia}\n"
+            rep = f"[IA bloque {idx}] {resultado_ia}"
 
         reemplazos.append((start, end, rep))
 
@@ -1048,7 +1044,7 @@ def columnas_a_texto(df: pd.DataFrame, col1: str, col2: str, *,
     piezas = []
     # Itera por filas y dentro de cada fila recorre col1 -> col2 (orden horizontal)
     for a, b in df[[col1, col2]].itertuples(index=False, name=None):
-        for v in (a, b):
+        for idx, v in enumerate((a, b)):
             if v is None or (isinstance(v, float) and pd.isna(v)):
                 if dropna:
                     continue
@@ -1056,6 +1052,11 @@ def columnas_a_texto(df: pd.DataFrame, col1: str, col2: str, *,
             s = str(v)
             if strip:
                 s = s.strip()
+
+            # 👉 SOLO col1 (idx == 0) se marca como título
+            if idx == 0:
+                s = f'<span class="titulo">{s}</span>'
+
             piezas.append(s)
     
     return sep.join(piezas)

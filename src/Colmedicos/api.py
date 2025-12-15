@@ -156,6 +156,19 @@ def informe_final(
             logs.append("Procesamiento de datos: SKIP (sin tokens)")
             text_for_next = text
 
+        if generar_portada:
+            t35 = time.perf_counter()
+            try:
+                portada = portada_gpt5(text_for_next)
+                text_con_portada = portada #+ "\n\n" + text_for_next
+                logs.append("Generación de portada y TOC: OK")
+                meta_detalle["t_portada"] = round(time.perf_counter() - t35, 4)
+                text_for_next = text_con_portada
+            except Exception as e_port:
+                logs.append(f"Generación de portada y TOC: ERROR → {e_port}")
+                meta_detalle["t_portada"] = round(time.perf_counter() - t35, 4)
+
+
         # 3) IA blocks (solo si hay +IA_)
         if hay_ia:
             t3 = time.perf_counter()
@@ -168,19 +181,7 @@ def informe_final(
             # text_for_next se mantiene
                 # 3.5) Portada y tabla de contenido opcional
        
-        if generar_portada:
-            t35 = time.perf_counter()
-            try:
-                portada = portada_gpt5(text_for_next)
-                text_con_portada = portada + "\n\n" + text_for_next
-                logs.append("Generación de portada y TOC: OK")
-                meta_detalle["t_portada"] = round(time.perf_counter() - t35, 4)
-                text_for_next = text_con_portada
-            except Exception as e_port:
-                logs.append(f"Generación de portada y TOC: ERROR → {e_port}")
-                meta_detalle["t_portada"] = round(time.perf_counter() - t35, 4)
-
-        
+       
         # 4) Plot blocks (solo si hay #GRAFICA#)
         if hay_plot:
             t4 = time.perf_counter()
