@@ -929,6 +929,8 @@ Debes devolver SIEMPRE, EN ESTE ORDEN EXACTO:
 A. Portada
 B. Saltos de línea
 C. Tabla de contenido
+D. Titulos del texto numerados acorde con Tabla de contenido
+E. Apendices eliminados por no tener información en sección de datos.
 
 No se permite ningún texto adicional antes, entre o después.
 
@@ -948,7 +950,7 @@ EMPRESA:
 
 RESULTADOS DE EVALUACIONES:
 
-[Desde el dd/mm/aaaa hasta dd/mm/aaaa]
+Desde el dd/mm/aaaa hasta dd/mm/aaaa
 
 [Nombre de la institución responsable del informe]
 [Ciudades donde opera / cobertura]
@@ -978,7 +980,9 @@ A. PATRÓN DE NUMERACIÓN
 
 Usa una tabulación o varios espacios entre el número y el título.
 Los títulos deben ir escritos exactamente como aparecen en el texto.
-De acuerdo con la narrativa del texto identifica titulos y subtítulos.
+De acuerdo con la narrativa del texto identifica titulos y subtítulos. 
+Los titulos se denotan en MAYUSCULAS
+Los subtitulos generalmente se denoran en minusculas.
 
 B. SECCIONES QUE SE INCLUYEN SIN NUMERAR
 
@@ -999,11 +1003,25 @@ C. DETECCIÓN DE TÍTULOS Y SUBTÍTULOS
 
 Detecta títulos y subtítulos a partir de:
 
+Se considera título de nivel 1 si:
+- El texto está en MAYÚSCULAS COMPLETAS, o
+- No contiene números ni símbolos, o
+- Es el primer título después de un <span class="titulo">
+
+Se considera subtítulo (nivel 2) si:
+- Está en minúsculas o en mayúsculas tipo frase (solo inicial mayúscula)
+- Su extensión es corta (1–10 palabras)
+
+Es subtítulo de nivel 3 si:
+- Va inmediatamente debajo de un subtítulo de nivel 2
+- Su texto es muy específico (normalmente en minúsculas sostenidas)
+
 - Líneas numeradas (1., 2., 3.1, 11.2.3, etc.)
-- Los titulos son única y exclusivamente aquellos textos que se encuentran entre la siguiente expresión '<span class="titulo">...</span>', todos los demás textos no deben ser considerados.
+- Los titulos y subtitulos son única y exclusivamente aquellos textos que se encuentran entre la siguiente expresión '<span class="titulo">...</span>', todos los demás textos no deben ser considerados.
+- Los titulos se denotan en MAYUSCULAS
+- Los subtitulos se denotan en minusculas.
 - Encabezados claramente identificables por formato o posición
 - No consideres como titulos los nombres de gráficos, tablas, figuras o anexos
-- Títulos en mayúsculas que funcionen como encabezados
 
 Respeta el orden en que aparecen en el texto.
 No te saltes ninguno.
@@ -1019,6 +1037,7 @@ E. TEXTO DEL TÍTULO
 Usa el texto EXACTO del encabezado, sin modificar palabras.
 No agregues ni quites términos.
 Elimina únicamente números o puntos finales del encabezado original.
+Sigue la misma instrucción para los subtitulos.
 
 ================================================================
 3. DETECCIÓN Y ELIMINACIÓN DE APÉNDICES
@@ -1033,26 +1052,34 @@ Un apéndice es una sección que cumple LA MAYORÍA las siguientes condiciones:
 - Contiene una solicitud explícita de gráfico (por ejemplo, un bloque delimitado por #…#).
 - Contiene un texto interpretativo variable delimitado por +...+ que depende de resultados numéricos o cálculos derivados de datos.
 
+
+De forma resumida un apendice es todo aquello que inicia con un titulo ('<span class="titulo">...</span>') y finaliza justo antes del siguiente titulo identificable
+
 El nombre del apéndice puede variar (Apéndice, Anexo, letra, o solo título).
+Considera apéndice únicamente si dentro de esa sección aparece al menos un bloque +...+.
 
 3.2 REGLA DE EVALUACIÓN DE DATOS
 
 Evalúa los valores numéricos presentes en el texto interpretativo variable del apéndice.
 
-DEBES ELIMINAR EL APÉNDICE COMPLETO si se cumple AL MENOS UNA de las siguientes condiciones:
-
-- Al evaluar datos numericos en los parrafos que se encuentran entre +...+ y todos los valores sean igual a 0.
-- Se detecta un error en los datos consultados.
-- Los datos son nulos, inexistentes, inconsistentes o generan error de cálculo.
+DEBES ELIMINAR EL APÉNDICE COMPLETO si:
+Un apendice se debe eliminar cuando se identifique dentro del texto entre +...+ alguna de las siguiente condiciones:
+- Dentro de los signos +..+ al evaluar datos numericos de los datos todos sean 0.
+- Dentro de los signos +..+ Se detecta un error en los datos consultados.
+- Dentro de los signos +...+ Los datos son nulos, inexistentes, inconsistentes o generan error de cálculo.
 
 3.3 ALCANCE DE LA ELIMINACIÓN
 
 Eliminar un apéndice completo significa:
+Elimina desde el titulo demarcado con ('<span class="titulo">...</span>') hasta justo antes de la siguiente expresión similar que te encuentres:
+SI DE FORMA PUNTUAL, IDENTIFICAS QUE UN APENDICE DEBE SER ELIMINADO, OMITE CUALQUIER REGLA DICHA EN LA NO ELIMINACIÓN DE INFORMACIÓN. SI Y SOLO SI LLEGAS A LA CONCLUSIÓN DE QUE UN APENDICE DEBE SER BORRADO.
+Te describo lo que tipicamente puede llegar a tener todo ese contenido, aunque no de forma obligatoria:
+- título.
+- texto descriptivo.
+- solicitud de gráfico.
+- texto interpretativo.
 
-- Eliminar su título.
-- Eliminar su texto descriptivo.
-- Eliminar la solicitud de gráfico.
-- Eliminar el texto interpretativo.
+Al eliminar, debe suceder lo siguiente:
 - No incluirlo en la tabla de contenido.
 - No dejar referencias residuales en el documento.
 
@@ -1133,13 +1160,13 @@ SALIDA:
 Devuelve exclusivamente lo siguiente:
 -Portada en texto plano.
 -Tabla de contenido en texto plano.
--Texto final depurado, con títulos numerados y coherente. No incluyas apéndices eliminados. No edites el contenido, solo la numeración, manten los apendices de gráficos (#...#) de forma literal, los apendices de IA (+...+) sin modificar nada.
+-Texto final depurado, con títulos numerados y coherente. No incluyas apéndices eliminados. No edites el contenido, solo la numeración, manten los bloques de gráficos (#...#) de forma literal, los bloques de IA (+...+) a menos que estos estén en un apendice a eliminar.
 
 FIN. SOLO SALIDA.
 
 INSTRUCCIÓN FINAL:
 
-Con base en el {texto} de entrada, devuelve ÚNICAMENTE SALIDA, sin textos adicionales.
+Con base en el {texto} de entrada, devuelve ÚNICAMENTE SALIDA, sin textos adicionales, ni conclusiones.
 """
 
 rol1 = """Eres un agente experto en documentación de salud ocupacional.
