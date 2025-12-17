@@ -160,7 +160,8 @@ def informe_final(
             t35 = time.perf_counter()
             try:
                 portada = portada_gpt5(text_for_next)
-                text_con_portada = portada #+ "\n\n" + text_for_next
+                text_con_portada = portada 
+                #+ "\n\n" + text_for_next
                 logs.append("Generación de portada y TOC: OK")
                 meta_detalle["t_portada"] = round(time.perf_counter() - t35, 4)
                 text_for_next = text_con_portada

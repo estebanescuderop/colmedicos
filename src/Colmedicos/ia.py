@@ -883,7 +883,7 @@ No expliques nada. Devuelve únicamente el JSON.
 def columns_batch_gpt5(payload):
     """Envía un prompt y devuelve la respuesta de GPT-5."""
     respuesta = client.chat.completions.create(
-        model="gpt-4.1-mini",  # 👈 Aquí usas GPT-5 directamente
+        model="gpt-4.1",  # 👈 Aquí usas GPT-5 directamente
         messages=[
             {"role": "system", "content": "Eres un asistente preciso y coherente con instrucciones de análisis de texto, especificamente hablando de temas relacionados con salud ocupacional."},
             {"role": "user", "content": clasificador_batch.replace("{payload}", str(payload))}
@@ -894,280 +894,205 @@ def columns_batch_gpt5(payload):
     params = json.loads(texto_respuesta)
     return params
 
-
 AG_P = """
-Eres un agente experto en documentación técnica de salud ocupacional y normalización estructural de documentos.
+Eres un agente experto en estructuración de documentos técnicos de salud ocupacional. 
+Debes transformar UNA sola cadena de texto en un documento final depurado cumpliendo un flujo 
+determinístico obligatorio. No puedes inventar, asumir, resumir, interpretar libremente ni 
+agregar contenido que no exista.
 
-Tu tarea es, a partir de UNA sola cadena de texto que recibirás como entrada, ejecutar de forma rigurosa y determinista los siguientes CINCO objetivos, sin excepción:
+TU MISIÓN ES CUMPLIR EXACTAMENTE ESTOS CINCO OBJETIVOS:
 
-OBJETIVOS DEL AGENTE
+1. Generar UNA sola portada.
+2. Construir UNA sola tabla de contenido, basada estrictamente en los títulos detectados.
+3. Detectar y ELIMINAR por completo los apéndices que no contengan datos válidos.
+4. Numerar y reenumerar títulos y subtítulos del contenido final.
+5. Garantizar que la salida respete EXACTAMENTE la estructura indicada por el usuario.
 
-1. Construir UNA ÚNICA portada en texto plano, basada exclusivamente en la información detectada en el texto de entrada y en las reglas definidas.
-2. Construir UNA ÚNICA tabla de contenido en texto plano, fiel al texto de entrada, sin inventar secciones.
-3. Detectar y ELIMINAR completamente los apéndices que no contengan datos reales para mostrar, según reglas estrictas de evaluación de datos.
-4. Enumerar y reenumerar títulos y subtítulos dentro del contenido del texto, garantizando coherencia total con la tabla de contenido.
-5. Garantizar que la numeración final del documento sea continua, consistente y estructuralmente correcta tras la eliminación de secciones.
-
-DEBES ANALIZAR EL CONTENIDO DEL TEXTO INTERNO ANTES DE GENERAR CUALQUIER SALIDA.
-NO DEBES GENERAR UNA SEGUNDA PORTADA.
-NO DEBES REPETIR NINGUNA SECCIÓN.
-NO DEBES INVENTAR CONTENIDO.
-NO DEBES RESUMIR EL DOCUMENTO.
-NO DEBES AGREGAR ANÁLISIS MÉDICO.
-NO DEBES DUPLICAR TEXTO.
-NO DEBES DEVOLVER EXPLICACIONES.
-NO DEBES DEVOLVER JSON, LISTAS, NI BLOQUES DE CÓDIGO.
-
-La salida debe ser ÚNICAMENTE texto plano.
+RESTRICCIONES ABSOLUTAS:
+- No generes explicaciones.
+- No agregues notas, avisos, comentarios ni textos fuera del formato solicitado.
+- No inventes contenido.
+- No alteres el texto original salvo para numerar títulos y eliminar apéndices.
+- No devuelvas JSON ni código.
+- La salida debe ser SOLO texto plano.
 
 ================================================================
-1. FORMATO DE SALIDA (OBLIGATORIO)
+1. ORDEN OBLIGATORIO DE SALIDA
 ================================================================
 
-Debes devolver SIEMPRE, EN ESTE ORDEN EXACTO:
+Debes devolver SIEMPRE, en ESTE ORDEN EXACTO:
 
-A. Portada
-B. Saltos de línea
-C. Tabla de contenido
-D. Titulos del texto numerados acorde con Tabla de contenido
-E. Apendices eliminados por no tener información en sección de datos.
+1. PORTADA  
+2. TABLA DE CONTENIDO (incluyendo marca explícita de títulos eliminados por apéndices)  
+3. DOCUMENTO FINAL DEPURADO, que debe contener:  
+   3.1. Sección textual obligatoria: “APÉNDICES ELIMINADOS”  
+        seguida de la lista de títulos de apéndices eliminados.  
+   3.2. Numeración final completa y coherente de todos los títulos/subtítulos válidos.
 
-No se permite ningún texto adicional antes, entre o después.
+NO debes escribir nada antes, entre o después.
 
-----------------------------------------------------------------
-1.1 PORTADA
-----------------------------------------------------------------
+================================================================
+2. PORTADA — FORMATO FIJO
+================================================================
 
-Genera SOLO UNA portada, usando saltos de línea y un estilo EXACTAMENTE similar al siguiente:
+La portada DEBE seguir el siguiente formato EXACTO:
 
 DIAGNOSTICO DE CONDICIONES DE SALUD POBLACIÓN TRABAJADORA
-
 EVALUACIONES MEDICAS OCUPACIONALES PERIODICAS PROGRAMADAS
 
 EMPRESA:
-
 [Nombre de la empresa]
 
 RESULTADOS DE EVALUACIONES:
-
 Desde el dd/mm/aaaa hasta dd/mm/aaaa
 
-[Nombre de la institución responsable del informe]
-[Ciudades donde opera / cobertura]
-[URL o nota informativa]
-
-Respeta los asteriscos *…* para resaltar en cursiva cuando aparezcan en el ejemplo.
-
-----------------------------------------------------------------
-1.2 TABLA DE CONTENIDO
-----------------------------------------------------------------
-
-Luego de varios saltos de línea, escribe el título:
-
-TABLA DE CONTENIDO
-
-A continuación, escribe la tabla de contenido en texto plano siguiendo estrictamente las reglas de numeración y detección definidas en este prompt.
-
-================================================================
-2. REGLAS PARA LA TABLA DE CONTENIDO
-================================================================
-
-A. PATRÓN DE NUMERACIÓN
-
-- Títulos de nivel 1 → 1, 2, 3, 4, etc.
-- Subtítulos de nivel 2 → 3.1, 3.2, 10.1, etc.
-- Subtítulos de nivel 3 → 11.2.1, 11.2.2, etc.
-
-Usa una tabulación o varios espacios entre el número y el título.
-Los títulos deben ir escritos exactamente como aparecen en el texto.
-De acuerdo con la narrativa del texto identifica titulos y subtítulos. 
-Los titulos se denotan en MAYUSCULAS
-Los subtitulos generalmente se denoran en minusculas.
-
-B. SECCIONES QUE SE INCLUYEN SIN NUMERAR
-
-Incluye en la tabla de contenido, SIN NUMERACIÓN, las siguientes secciones si existen en el texto:
-
-- INTRODUCCIÓN
-- MARC0 LEGAL
-- OBJETIVOS
-- OBJETIVO GENERAL
-- OBJETIVOS ESPECÍFICOS
-- CARACTERÍSTICAS DE LA EMPRESA
-- METODOLOGÍA
-- MATERIALES Y MÉTODOS
-
-Estas secciones NO deben romper el orden lógico del documento.
-
-C. DETECCIÓN DE TÍTULOS Y SUBTÍTULOS
-
-Detecta títulos y subtítulos a partir de:
-
-Se considera título de nivel 1 si:
-- El texto está en MAYÚSCULAS COMPLETAS, o
-- No contiene números ni símbolos, o
-- Es el primer título después de un <span class="titulo">
-
-Se considera subtítulo (nivel 2) si:
-- Está en minúsculas o en mayúsculas tipo frase (solo inicial mayúscula)
-- Su extensión es corta (1–10 palabras)
-
-Es subtítulo de nivel 3 si:
-- Va inmediatamente debajo de un subtítulo de nivel 2
-- Su texto es muy específico (normalmente en minúsculas sostenidas)
-
-- Líneas numeradas (1., 2., 3.1, 11.2.3, etc.)
-- Los titulos y subtitulos son única y exclusivamente aquellos textos que se encuentran entre la siguiente expresión '<span class="titulo">...</span>', todos los demás textos no deben ser considerados.
-- Los titulos se denotan en MAYUSCULAS
-- Los subtitulos se denotan en minusculas.
-- Encabezados claramente identificables por formato o posición
-- No consideres como titulos los nombres de gráficos, tablas, figuras o anexos
-
-Respeta el orden en que aparecen en el texto.
-No te saltes ninguno.
-No agregues ninguno que no exista.
-
-D. NUMERACIÓN EXISTENTE
-
-- Si un título YA tiene numeración, consérvala.
-- Si NO tiene numeración, asígnala siguiendo el patrón del punto A.
-
-E. TEXTO DEL TÍTULO
-
-Usa el texto EXACTO del encabezado, sin modificar palabras.
-No agregues ni quites términos.
-Elimina únicamente números o puntos finales del encabezado original.
-Sigue la misma instrucción para los subtitulos.
-
-================================================================
-3. DETECCIÓN Y ELIMINACIÓN DE APÉNDICES
-================================================================
-
-3.1 DEFINICIÓN DE APÉNDICE
-
-Un apéndice es una sección que cumple LA MAYORÍA las siguientes condiciones:
-
-- Tiene un título o subtítulo identificable (por ejemplo, Apéndice A, Anexo 1, Letra B, etc.).
-- Contiene un texto descriptivo fijo.
-- Contiene una solicitud explícita de gráfico (por ejemplo, un bloque delimitado por #…#).
-- Contiene un texto interpretativo variable delimitado por +...+ que depende de resultados numéricos o cálculos derivados de datos.
-
-
-De forma resumida un apendice es todo aquello que inicia con un titulo ('<span class="titulo">...</span>') y finaliza justo antes del siguiente titulo identificable
-
-El nombre del apéndice puede variar (Apéndice, Anexo, letra, o solo título).
-Considera apéndice únicamente si dentro de esa sección aparece al menos un bloque +...+.
-
-3.2 REGLA DE EVALUACIÓN DE DATOS
-
-Evalúa los valores numéricos presentes en el texto interpretativo variable del apéndice.
-
-DEBES ELIMINAR EL APÉNDICE COMPLETO si:
-Un apendice se debe eliminar cuando se identifique dentro del texto entre +...+ alguna de las siguiente condiciones:
-- Dentro de los signos +..+ al evaluar datos numericos de los datos todos sean 0.
-- Dentro de los signos +..+ Se detecta un error en los datos consultados.
-- Dentro de los signos +...+ Los datos son nulos, inexistentes, inconsistentes o generan error de cálculo.
-
-3.3 ALCANCE DE LA ELIMINACIÓN
-
-Eliminar un apéndice completo significa:
-Elimina desde el titulo demarcado con ('<span class="titulo">...</span>') hasta justo antes de la siguiente expresión similar que te encuentres:
-SI DE FORMA PUNTUAL, IDENTIFICAS QUE UN APENDICE DEBE SER ELIMINADO, OMITE CUALQUIER REGLA DICHA EN LA NO ELIMINACIÓN DE INFORMACIÓN. SI Y SOLO SI LLEGAS A LA CONCLUSIÓN DE QUE UN APENDICE DEBE SER BORRADO.
-Te describo lo que tipicamente puede llegar a tener todo ese contenido, aunque no de forma obligatoria:
-- título.
-- texto descriptivo.
-- solicitud de gráfico.
-- texto interpretativo.
-
-Al eliminar, debe suceder lo siguiente:
-- No incluirlo en la tabla de contenido.
-- No dejar referencias residuales en el documento.
-
-================================================================
-4. ENUMERACIÓN Y REENUMERACIÓN DEL CONTENIDO
-================================================================
-
-Enumeración de los titulos dentro del texto:
-- Debes numerar todos los títulos y subtítulos del contenido del texto.
-- La identificación de títulos y subtítulos debe seguir las mismas reglas definidas para la tabla de contenido.
-- La numeración debe ser continua, sin saltos.
-- La numeración de los titulos y subtitulos debe coincidir EXACTAMENTE con la tabla de contenido.
-
-Reenumeración tras eliminación de apéndices:
-Tras la eliminación de apéndices u otras secciones completas:
-
-- Debes reenumerar títulos y subtítulos del contenido del texto.
-- La identificación de títulos y subtítulos debe seguir las mismas reglas definidas para la tabla de contenido.
-- La numeración final debe ser continua, sin saltos.
-- La numeración de los titulos y subtitulos debe coincidir EXACTAMENTE con la tabla de contenido.
-
-La tabla de contenido es la fuente de verdad estructural.
-El contenido debe ajustarse a ella.
-
-
-Esto aplica especialmente a:
-- Apéndices
-- Subapéndices
-- Secciones finales del documento
-
-================================================================
-5. DETECCIÓN DE INFORMACIÓN PARA LA PORTADA
-================================================================
-
-A. TÍTULO PRINCIPAL
-
-- Si existe un encabezado global en mayúsculas tipo “DIAGNOSTICO…”, úsalo.
-- Si no, usa el título genérico:
-  DIAGNOSTICO DE CONDICIONES DE SALUD POBLACIÓN TRABAJADORA
-
-B. NOMBRE DE LA EMPRESA
-
-- Busca patrones como: empresa, EMPRESA:, {{nombre_cliente}}
-- Si no se detecta, usa:
-  [Nombre de la empresa]
-
-C. RANGO DE FECHAS
-
-- Si detectas fechas explícitas, construye:
-  [Desde el dd/mm/aaaa hasta dd/mm/aaaa]
-- Si no, usa:
-  [Rango de fechas de las evaluaciones]
-
-D. INSTITUCIÓN RESPONSABLE
-
-Usa de forma literal:
 Laboratorio Clínico Colmedicos I.P.S S.A.S
-
-E. COBERTURA Y URL
-
-Usa de forma literal:
 Medellín – Bogotá D.C. - Cundinamarca – Rionegro – Cali – Palmira – Red nacional.
 www.colmedicos.com
 
+Reglas:
+- Detecta empresa y fechas únicamente si aparecen claramente en el texto.
+- Si no aparecen, deja los marcadores entre [ ].
+- No modifiques este formato.
+
 ================================================================
-6. ESTILO GENERAL
+3. DETECCIÓN Y CLASIFICACIÓN DE TÍTULOS (Pipeline obligatorio)
 ================================================================
 
-- Redacción formal, neutra y clara.
-- No expliques lo que estás haciendo.
-- No agregues comentarios.
-- No notas aclaratorias.
-- No salidas parciales.
-- portada, tabla de contenido y texto literal, sólo con las correcciones de titulos y eliminaciones de apendices.
+Antes de generar la tabla de contenido o numerar el documento, debes ejecutar ESTE PROCESO 
+DE CUATRO FASES. GPT-4.1 no puede desviarse de este orden.
+
+-------------------------
+FASE 1 — EXTRACCIÓN
+-------------------------
+1. Extrae TODAS las ocurrencias literales de:  
+   <span class="titulo">...</span>
+2. Cada ocurrencia es un título independiente.
+3. Usa su texto EXACTO; no lo modifiques.
+
+-------------------------
+FASE 2 — CLASIFICACIÓN DE NIVEL
+-------------------------
+
+Usa SOLO estas reglas:
+
+NIVEL 1
+- Texto en MAYÚSCULAS COMPLETAS, o
+- Es el primer título del documento.
+
+NIVEL 2
+- Texto en minúsculas o “Título en Mayúscula Inicial”, o
+- Sigue inmediatamente a un nivel 1.
+
+NIVEL 3
+- Sigue a un nivel 2, y
+- Es más específico en contenido.
+
+Reglas rígidas:
+- Si hay ambigüedad → asigna el MISMO nivel que el título anterior.
+- Dos títulos consecutivos en mayúsculas → ambos nivel 1.
+- No mezclar niveles arbitrariamente.
+
+-------------------------
+FASE 3 — NUMERACIÓN
+-------------------------
+Usa exclusivamente este patrón:
+
+- Nivel 1 →       1, 2, 3 …
+- Nivel 2 →       1.1, 1.2, 1.3 …
+- Nivel 3 →       1.1.1, 1.1.2 …
+
+Reglas:
+- Los contadores reinician cuando corresponde.
+- La numeración nunca retrocede.
+- Debes asegurar continuidad absoluta.
+
+-------------------------
+FASE 4 — TABLA DE CONTENIDO
+-------------------------
+Construye la tabla con:
+- numeración asignada,
+- título EXACTO,
+- en el orden detectado.
+
+Los apéndices que sean eliminados deben aparecer marcados en esta tabla como:
+[ELIMINADO]
+
+================================================================
+4. APÉNDICES — DETECCIÓN Y ELIMINACIÓN FORZADA
+================================================================
+
+Un apéndice es cualquier sección que:
+- Inicia con <span class="titulo">...</span>, y
+- Contiene al menos un bloque +...+.
+
+-------------------------
+PROCESO OBLIGATORIO DE EVALUACIÓN
+-------------------------
+
+FASE 1 — EXTRAER BLOQUES
+- Extrae TODO el contenido dentro de cada +...+ del apéndice.
+
+FASE 2 — VALIDAR DATOS
+El apéndice SE ELIMINA si ocurre UNA sola de estas condiciones:
+
+- El contenido entre +...+ está vacío.
+- No contiene números válidos.
+- Todos los números encontrados son 0.
+- Contiene errores, avisos o textos de falla.
+- Contiene información incoherente o no relacionada con datos.
+- No se puede determinar con certeza que existen datos válidos.
+
+*Regla máxima:*  
+SI HAY DUDA → ELIMINAR.
+
+FASE 3 — ELIMINACIÓN TOTAL
+Debe eliminarse todo el bloque desde el <span class="titulo">...</span> 
+hasta el siguiente título detectable.
+
+FASE 4 — REGISTRO
+Debes registrar el título del apéndice eliminado y reportarlo en:
+“APÉNDICES ELIMINADOS”
+
+================================================================
+5. DOCUMENTO FINAL NUMERADO
+================================================================
+
+Reglas para la salida del documento final:
+
+1. Sustituye cada <span class="titulo">TEXTO</span> por:
+   [numeración asignada] TEXTO
+
+2. NO modifiques el texto contenido fuera de títulos.
+
+3. Los apéndices eliminados no deben aparecer en el contenido final.
+
+4. La numeración del documento debe coincidir EXACTAMENTE con la tabla de contenido.
+
+================================================================
+6. ESTRUCTURA FINAL DE SALIDA (OBLIGATORIA)
+================================================================
+
+La salida final DEBE ser:
+
+1. PORTADA  
+
+2. TABLA DE CONTENIDO  
+   (incluyendo marcas [ELIMINADO] cuando corresponda)
+
+3. DOCUMENTO FINAL  
+   3.1 CONTENIDO NUMERADO FINAL  
+       (texto depurado con títulos numerados y sin apéndices eliminados)
+   3.2 APÉNDICES ELIMINADOS:  
+       - lista exacta de títulos eliminados  
 
 
-SALIDA:
-Devuelve exclusivamente lo siguiente:
--Portada en texto plano.
--Tabla de contenido en texto plano.
--Texto final depurado, con títulos numerados y coherente. No incluyas apéndices eliminados. No edites el contenido, solo la numeración, manten los bloques de gráficos (#...#) de forma literal, los bloques de IA (+...+) a menos que estos estén en un apendice a eliminar.
+NO generes nada más. NO agregues explicaciones.
 
-FIN. SOLO SALIDA.
-
-INSTRUCCIÓN FINAL:
-
-Con base en el {texto} de entrada, devuelve ÚNICAMENTE SALIDA, sin textos adicionales, ni conclusiones.
+FIN.  
+A partir del {texto} de entrada, produce únicamente la salida con esta estructura exacta.
 """
+
 
 rol1 = """Eres un agente experto en documentación de salud ocupacional.
 Tu tarea es, a partir de una sola cadena de texto que recibirás como entrada, construir una portada y una tabla de contenido en texto plano."""
