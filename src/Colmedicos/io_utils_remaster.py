@@ -190,45 +190,153 @@ def aplicar_ia_en_texto(texto: str, resultados_ia, formato: str = "html") -> str
 
 @register("process_ia_blocks")
 def process_ia_blocks(
-    texto: str # "raise" | "return_input"
+    texto: str,
+    *,
+    batch_size: int = 40,
+    max_workers: int = 1,
+    debug: bool = False,
 ) -> str:
+    """
+    Versión FINAL optimizada de bloques IA (+ ... +)
 
-   # 1) Ejecutar operaciones_gpt5 y asegurar conversión a JSON con spans
+    - Batching de instrucciones (optimiza costo)
+    - Paralelización de llamadas IA (optimiza tiempo)
+    - Orden y spans deterministas
+    - Fallback seguro ante errores/cuota
+    """
+
+    import concurrent.futures
+    import json
+
+    # -------------------------------------------------
+    # 1️⃣ Extraer bloques
+    # -------------------------------------------------
     extract = extraer_ia_blocks(texto)
-    out = ask_gpt5(extract)
- 
-    if isinstance(out, str):
+    if not extract:
+        return texto
+
+    def _chunk_list(lst, size):
+        for i in range(0, len(lst), size):
+            yield lst[i:i + size]
+
+    # -------------------------------------------------
+    # 2️⃣ Crear batches
+    # -------------------------------------------------
+    batches = list(_chunk_list(extract, batch_size))
+
+    # -------------------------------------------------
+    # 3️⃣ Job IA (batch)
+    # -------------------------------------------------
+    def _procesar_batch(batch):
         try:
-            out = json.loads(out)
-        except json.JSONDecodeError as e:
-            raise ValueError(f"JSON inválido: {e}") from e
+            out = ask_gpt5(batch)
 
-    if not isinstance(out, list):
-        raise TypeError("El resultado de operaciones_gpt5 debe ser una lista de objetos JSON.")
+            if isinstance(out, str):
+                try:
+                    out = _json_loads_loose(out)
+                except Exception as e:
+                    if debug:
+                        print("Error parseando IA JSON:", e)
+                    return []
 
-    resultados_ops: List[
-        Tuple[int, Dict[str, Any], Union[Tuple[int, int], None], str]
-    ] = []
+        except Exception as e:
+            if debug:
+                print("Error IA batch:", e)
+            return []
 
+        if not isinstance(out, list):
+            return []
 
-    # 2) Ejecutar cada operación y formatear resultado
-    for item in out:
-        if isinstance(item, dict) and "params" in item:
-            idx = item.get("idx")
-            params = item.get("params")
-            span = item.get("span")
+        return out  # [{idx, params, span}, ...]
 
+    # -------------------------------------------------
+    # 4️⃣ Ejecutar IA en paralelo
+    # -------------------------------------------------
+    resultados_por_idx = {}
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(_procesar_batch, batch) for batch in batches]
+
+        for future in concurrent.futures.as_completed(futures):
             try:
-                resultado_fmt = params
-                resultados_ops.append((idx, params, span, resultado_fmt))
+                out_batch = future.result()
+                for item in out_batch:
+                    if isinstance(item, dict) and "params" in item:
+                        resultados_por_idx[item["idx"]] = item
             except Exception as e:
-                # Mantener trazabilidad sin romper el tipo (resultado como string legible)
-                error_txt = f"[error:{str(e)}]"
-                resultados_ops.append((idx, params, span, error_txt))
-    
-    # 3) Reemplazar spans por resultados (elige "html" o "texto simple")
-    texto_reemplazado = aplicar_ia_en_texto(texto, resultados_ops, formato="html")
+                if debug:
+                    print("Error future IA:", e)
+
+    # -------------------------------------------------
+    # 5️⃣ Reemplazar en texto (SECUENCIAL)
+    # -------------------------------------------------
+    resultados_ia = []
+
+    for bloque in sorted(extract, key=lambda b: b["idx"]):
+        idx = bloque["idx"]
+        span = bloque["span"]
+
+        item = resultados_por_idx.get(idx)
+        if not item:
+            continue
+
+        params = item.get("params")
+
+        try:
+            resultados_ia.append((idx, bloque["prompt"], span, params))
+        except Exception as e:
+            resultados_ia.append((idx, bloque["prompt"], span, f"[error:{str(e)}]"))
+
+    texto_reemplazado = aplicar_ia_en_texto(
+        texto,
+        resultados_ia,
+        formato="html"
+    )
+
     return texto_reemplazado
+
+
+# @register("process_ia_blocks")
+# def process_ia_blocks(
+#     texto: str # "raise" | "return_input"
+# ) -> str:
+
+#    # 1) Ejecutar operaciones_gpt5 y asegurar conversión a JSON con spans
+#     extract = extraer_ia_blocks(texto)
+#     out = ask_gpt5(extract)
+ 
+#     if isinstance(out, str):
+#         try:
+#             out = json.loads(out)
+#         except json.JSONDecodeError as e:
+#             raise ValueError(f"JSON inválido: {e}") from e
+
+#     if not isinstance(out, list):
+#         raise TypeError("El resultado de operaciones_gpt5 debe ser una lista de objetos JSON.")
+
+#     resultados_ops: List[
+#         Tuple[int, Dict[str, Any], Union[Tuple[int, int], None], str]
+#     ] = []
+
+
+#     # 2) Ejecutar cada operación y formatear resultado
+#     for item in out:
+#         if isinstance(item, dict) and "params" in item:
+#             idx = item.get("idx")
+#             params = item.get("params")
+#             span = item.get("span")
+
+#             try:
+#                 resultado_fmt = params
+#                 resultados_ops.append((idx, params, span, resultado_fmt))
+#             except Exception as e:
+#                 # Mantener trazabilidad sin romper el tipo (resultado como string legible)
+#                 error_txt = f"[error:{str(e)}]"
+#                 resultados_ops.append((idx, params, span, error_txt))
+    
+#     # 3) Reemplazar spans por resultados (elige "html" o "texto simple")
+#     texto_reemplazado = aplicar_ia_en_texto(texto, resultados_ops, formato="html")
+#     return texto_reemplazado
 
 # ----------------------------
 # 5) Función que calcula DATOS.
@@ -302,51 +410,158 @@ def extraer_data_blocks(texto: str):
     return bloques
 
 
-@register("process_data_blocks")
-def process_data_blocks(df: pd.DataFrame, texto: str):
-    """
-    Réplica del pipeline_graficos_gpt5_final pero para OPERACIONES:
+# @register("process_data_blocks")
+# def process_data_blocks(df: pd.DataFrame, texto: str):
+#     """
+#     Réplica del pipeline_graficos_gpt5_final pero para OPERACIONES:
 
-    - operaciones_gpt5(df, texto) -> lista JSON de objetos con {idx, params, ...}
-    - ejecutar_operaciones_condicionales(df, params) -> ejecuta la operación
-    - _format_result_plain(resultado) -> string final a insertar
-    - aplicar_operaciones_en_texto(texto, resultados_ops, formato="html") -> reemplaza ||...||
-    """
-    # 1) Ejecutar operaciones_gpt5 y asegurar conversión a JSON con spans
-    extract = extraer_data_blocks(texto)
-    out = operaciones_gpt5(df, extract)
+#     - operaciones_gpt5(df, texto) -> lista JSON de objetos con {idx, params, ...}
+#     - ejecutar_operaciones_condicionales(df, params) -> ejecuta la operación
+#     - _format_result_plain(resultado) -> string final a insertar
+#     - aplicar_operaciones_en_texto(texto, resultados_ops, formato="html") -> reemplaza ||...||
+#     """
+#     # 1) Ejecutar operaciones_gpt5 y asegurar conversión a JSON con spans
+#     extract = extraer_data_blocks(texto)
+#     out = operaciones_gpt5(df, extract)
  
-    if isinstance(out, str):
+#     if isinstance(out, str):
+#         try:
+#             out = json.loads(out)
+#         except json.JSONDecodeError as e:
+#             raise ValueError(f"JSON inválido: {e}") from e
+
+#     if not isinstance(out, list):
+#         raise TypeError("El resultado de operaciones_gpt5 debe ser una lista de objetos JSON.")
+
+#     resultados_ops: List[
+#         Tuple[int, Dict[str, Any], Union[Tuple[int, int], None], str]
+#     ] = []
+
+#     # 2) Ejecutar cada operación y formatear resultado
+#     for item in out:
+#         if isinstance(item, dict) and "params" in item:
+#             idx = item.get("idx")
+#             params = item.get("params")
+#             span = item.get("span")
+
+#             try:
+#                 resultado = ejecutar_operaciones_condicionales(df, params)
+#                 resultado_fmt = _format_result_plain(resultado)
+#                 resultados_ops.append((idx, params, span, resultado_fmt))
+#             except Exception as e:
+#                 # Mantener trazabilidad sin romper el tipo (resultado como string legible)
+#                 error_txt = f"[error:{str(e)}]"
+#                 resultados_ops.append((idx, params, span, error_txt))
+
+#     # 3) Reemplazar spans por resultados (elige "html" o "texto simple")
+#     texto_reemplazado = aplicar_operaciones_en_texto(texto, resultados_ops, formato="html")
+
+#     return texto_reemplazado
+
+@register("process_data_blocks")
+def process_data_blocks(
+    df: pd.DataFrame,
+    texto: str,
+    *,
+    batch_size: int = 7,
+    max_workers: int = 2,
+    debug: bool = False,
+):
+    """
+    Versión FINAL paralelizada del orquestador de OPERACIONES:
+
+    - Batching de bloques ||...|| (optimiza costo IA)
+    - Paralelización de operaciones_gpt5 (optimiza tiempo)
+    - Ejecución y reemplazo determinista
+    """
+
+    import concurrent.futures
+    import json
+
+    # -------------------------------------------------
+    # 1️⃣ Extraer bloques
+    # -------------------------------------------------
+    extract = extraer_data_blocks(texto)
+    if not extract:
+        return texto
+
+    def _chunk_list(lst, size):
+        for i in range(0, len(lst), size):
+            yield lst[i:i + size]
+
+    # -------------------------------------------------
+    # 2️⃣ Crear jobs (batches de bloques)
+    # -------------------------------------------------
+    batches = list(_chunk_list(extract, batch_size))
+
+    # -------------------------------------------------
+    # 3️⃣ Job puro IA (BATCH)
+    # -------------------------------------------------
+    def _procesar_batch(batch):
         try:
-            out = json.loads(out)
-        except json.JSONDecodeError as e:
-            raise ValueError(f"JSON inválido: {e}") from e
+            out = operaciones_gpt5(df, batch)
+            if isinstance(out, str):
+                out = json.loads(out)
+        except Exception as e:
+            if debug:
+                print("Error IA batch:", e)
+            return []
 
-    if not isinstance(out, list):
-        raise TypeError("El resultado de operaciones_gpt5 debe ser una lista de objetos JSON.")
+        if not isinstance(out, list):
+            return []
 
-    resultados_ops: List[
-        Tuple[int, Dict[str, Any], Union[Tuple[int, int], None], str]
-    ] = []
+        return out  # lista de {idx, params, span}
 
-    # 2) Ejecutar cada operación y formatear resultado
-    for item in out:
-        if isinstance(item, dict) and "params" in item:
-            idx = item.get("idx")
-            params = item.get("params")
-            span = item.get("span")
+    # -------------------------------------------------
+    # 4️⃣ Ejecutar IA en paralelo
+    # -------------------------------------------------
+    resultados_por_idx = {}
 
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(_procesar_batch, batch) for batch in batches]
+
+        for future in concurrent.futures.as_completed(futures):
             try:
-                resultado = ejecutar_operaciones_condicionales(df, params)
-                resultado_fmt = _format_result_plain(resultado)
-                resultados_ops.append((idx, params, span, resultado_fmt))
+                out_batch = future.result()
+                for item in out_batch:
+                    if isinstance(item, dict) and "params" in item:
+                        idx = item.get("idx")
+                        resultados_por_idx[idx] = item
             except Exception as e:
-                # Mantener trazabilidad sin romper el tipo (resultado como string legible)
-                error_txt = f"[error:{str(e)}]"
-                resultados_ops.append((idx, params, span, error_txt))
+                if debug:
+                    print("Error future batch:", e)
 
-    # 3) Reemplazar spans por resultados (elige "html" o "texto simple")
-    texto_reemplazado = aplicar_operaciones_en_texto(texto, resultados_ops, formato="html")
+    # -------------------------------------------------
+    # 5️⃣ Ejecutar operaciones (SECUENCIAL, RÁPIDO)
+    # -------------------------------------------------
+    resultados_ops = []
+
+    for bloque in sorted(extract, key=lambda b: b["idx"]):
+        idx = bloque["idx"]
+        span = bloque["span"]
+
+        item = resultados_por_idx.get(idx)
+        if not item:
+            continue
+
+        params = item.get("params")
+
+        try:
+            resultado = ejecutar_operaciones_condicionales(df, params)
+            resultado_fmt = _format_result_plain(resultado)
+            resultados_ops.append((idx, params, span, resultado_fmt))
+        except Exception as e:
+            error_txt = f"[error:{str(e)}]"
+            resultados_ops.append((idx, params, span, error_txt))
+
+    # -------------------------------------------------
+    # 6️⃣ Reemplazar spans en texto
+    # -------------------------------------------------
+    texto_reemplazado = aplicar_operaciones_en_texto(
+        texto,
+        resultados_ops,
+        formato="html"
+    )
 
     return texto_reemplazado
 
@@ -398,6 +613,9 @@ def _fig_to_data_uri(fig) -> str:
     buf.seek(0)
     b64 = base64.b64encode(buf.read()).decode("ascii")
     return f"data:image/png;base64,{b64}"
+
+
+
 
 def aplicar_graficos_en_texto(texto: str, resultados_graficos, formato: str = "html") -> str:
     """
@@ -486,42 +704,305 @@ def extraer_plot_blocks(texto: str):
     
     return bloques
 
+def _strip_code_fences(s: str) -> str:
+    s = s.strip()
+    if s.startswith("```"):
+        # remove first fence line
+        s = s.split("```", 2)
+        if len(s) >= 3:
+            # s = ["", "json or lang", "body..."]
+            return s[2].strip()
+        return s[-1].strip()
+    return s
 
-def process_plot_blocks(df: pd.DataFrame, texto: str):
-    # Ejecutar graficos_gpt5 y asegurar conversión a JSON
+def _json_loads_loose(s: str) -> Any:
+    s = _strip_code_fences(s)
+    try:
+        return json.loads(s)
+    except Exception:
+        # intento simple: localizar el primer '[' o '{' y recortar
+        first = min((i for i in [s.find("["), s.find("{")] if i != -1), default=-1)
+        last = max(s.rfind("]"), s.rfind("}"))
+        if first != -1 and last != -1 and last > first:
+            return json.loads(s[first:last+1])
+        raise
+
+
+def process_plot_blocks(
+    df: pd.DataFrame,
+    texto: str,
+    *,
+    batch_size: int = 8,
+    max_workers: int = 2,
+    debug: bool = False,
+):
+    """
+    Versión FINAL paralelizada del orquestador de GRÁFICAS:
+
+    - Batching de bloques #...# (optimiza costo IA)
+    - Paralelización de graficos_gpt5 (optimiza tiempo)
+    - Render de gráficas y reemplazo determinista
+    """
+
+    import concurrent.futures
+    import json
+
+    # -------------------------------------------------
+    # 1️⃣ Extraer bloques
+    # -------------------------------------------------
     extract = extraer_plot_blocks(texto)
-    out = graficos_gpt5(df, extract)
-    if isinstance(out, str):
+    if not extract:
+        return texto
+
+    def _chunk_list(lst, size):
+        for i in range(0, len(lst), size):
+            yield lst[i:i + size]
+
+    # -------------------------------------------------
+    # 2️⃣ Crear batches
+    # -------------------------------------------------
+    batches = list(_chunk_list(extract, batch_size))
+
+    # -------------------------------------------------
+    # 3️⃣ Job IA (batch)
+    # -------------------------------------------------
+    def _procesar_batch(batch):
         try:
-            out = json.loads(out)
-        except json.JSONDecodeError as e:
-            raise ValueError(f"JSON inválido: {e}") from e
+            out = graficos_gpt5(df, batch)
+            if isinstance(out, str):
+                try:
+                    out = _json_loads_loose(out)
+                except Exception as e:
+                    if debug:
+                        print("Error parseando JSON gráficos:", e)
+                    return []
 
-    # Validar tipo
-    if not isinstance(out, list):
-        raise TypeError("El resultado de graficos_gpt5 debe ser una lista de objetos JSON.")
+            if not isinstance(out, list):
+                return []
+        except Exception as e:
+            if debug:
+                print("Error IA graficos batch:", e)
+            return []
 
-    params_list = []
-    resultados_graficos: List[
-        Tuple[int, Dict[str, Any], Union[Tuple[int, int], None], Union[str, Dict[str, str]]]
-    ] = []
-    for item in out:
-        if isinstance(item, dict) and "params" in item:
-            idx, params, span = item["idx"], item["params"], item["span"]
-            params_list.append(params)
+        if not isinstance(out, list):
+            return []
+
+        return out  # [{idx, params, span}...]
+
+    # -------------------------------------------------
+    # 4️⃣ Ejecutar IA en paralelo
+    # -------------------------------------------------
+    resultados_por_idx = {}
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(_procesar_batch, batch) for batch in batches]
+
+        for future in concurrent.futures.as_completed(futures):
             try:
-                fig, ax = plot_from_params(df, params)
-                resultados = _fig_to_data_uri(fig)
-                resultados_graficos.append((idx, params, span, resultados))
+                out_batch = future.result()
+                for item in out_batch:
+                    if isinstance(item, dict) and "params" in item:
+                        resultados_por_idx[item["idx"]] = item
             except Exception as e:
-                # En caso de error, aún registramos la entrada para trazabilidad (sin romper el tipo)
-                error_uri = f"data:text/plain;base64,{_to_base64(f'error:{str(e)}')}"
-                resultados_graficos.append((idx, params, span, error_uri))
+                if debug:
+                    print("Error future gráficos:", e)
 
-    # 3) Reemplazar spans por data-URIs (elige el formato que prefieras: "uri" | "md" | "html")
-    texto_reemplazado = aplicar_graficos_en_texto(texto, resultados_graficos, formato="html")
+    # -------------------------------------------------
+    # 5️⃣ Renderizar gráficas (SECUENCIAL)
+    # -------------------------------------------------
+    resultados_graficos = []
+
+    for bloque in sorted(extract, key=lambda b: b["idx"]):
+        idx = bloque["idx"]
+        span = bloque["span"]
+
+        item = resultados_por_idx.get(idx)
+        if not item:
+            continue
+
+        params = item.get("params")
+
+        try:
+            fig, ax = plot_from_params(df, params)
+            uri = _fig_to_data_uri(fig)
+            resultados_graficos.append((idx, params, span, uri))
+        except Exception as e:
+            error_uri = f"data:text/plain;base64,{_to_base64(f'error:{str(e)}')}"
+            resultados_graficos.append((idx, params, span, error_uri))
+
+    # -------------------------------------------------
+    # 6️⃣ Reemplazar en texto
+    # -------------------------------------------------
+    texto_reemplazado = aplicar_graficos_en_texto(
+        texto,
+        resultados_graficos,
+        formato="html"
+    )
 
     return texto_reemplazado
+
+
+# def process_plot_blocks(df: pd.DataFrame, texto: str):
+#     # Ejecutar graficos_gpt5 y asegurar conversión a JSON
+#     extract = extraer_plot_blocks(texto)
+#     out = graficos_gpt5(df, extract)
+#     if isinstance(out, str):
+#         try:
+#             out = json.loads(out)
+#         except json.JSONDecodeError as e:
+#             raise ValueError(f"JSON inválido: {e}") from e
+
+#     # Validar tipo
+#     if not isinstance(out, list):
+#         raise TypeError("El resultado de graficos_gpt5 debe ser una lista de objetos JSON.")
+
+#     params_list = []
+#     resultados_graficos: List[
+#         Tuple[int, Dict[str, Any], Union[Tuple[int, int], None], Union[str, Dict[str, str]]]
+#     ] = []
+#     for item in out:
+#         if isinstance(item, dict) and "params" in item:
+#             idx, params, span = item["idx"], item["params"], item["span"]
+#             params_list.append(params)
+#             try:
+#                 fig, ax = plot_from_params(df, params)
+#                 resultados = _fig_to_data_uri(fig)
+#                 resultados_graficos.append((idx, params, span, resultados))
+#             except Exception as e:
+#                 # En caso de error, aún registramos la entrada para trazabilidad (sin romper el tipo)
+#                 error_uri = f"data:text/plain;base64,{_to_base64(f'error:{str(e)}')}"
+#                 resultados_graficos.append((idx, params, span, error_uri))
+
+#     # 3) Reemplazar spans por data-URIs (elige el formato que prefieras: "uri" | "md" | "html")
+#     texto_reemplazado = aplicar_graficos_en_texto(texto, resultados_graficos, formato="html")
+
+#     return texto_reemplazado
+
+
+# @register("aplicar_multiples_columnas_gpt5")
+# def aplicar_multiples_columnas_gpt5(
+#     df: pd.DataFrame,
+#     tareas: List[Dict[str, Any]],
+#     *,
+#     replace_existing: bool = True,
+#     chunk_tareas: int = 1,
+#     chunk_registros: int = 300,
+#     debug: bool = False,
+#     fn_ia = columns_batch_gpt5
+# ):
+#     """
+#     Versión optimizada con CLUSTERING:
+#     Agrupa registros con los mismos valores en columnas_necesarias
+#     para reducir llamadas a IA sin alterar la lógica original.
+#     """
+
+#     import json
+#     import math
+#     from collections import defaultdict
+
+#     if not tareas:
+#         return df
+
+#     df_out = df.copy()
+
+#     def _chunk_list(lst, size):
+#         for i in range(0, len(lst), size):
+#             yield lst[i:i+size]
+
+#     # Inicializar columnas de salida
+#     for tarea in tareas:
+#         col = tarea["nueva_columna"]
+#         if col not in df_out.columns:
+#             df_out[col] = None
+
+#     # Procesamiento por batches de tareas
+#     for tareas_batch in _chunk_list(tareas, chunk_tareas):
+
+#         # 1️⃣ Determinar qué columnas necesita IA
+#         columnas_necesarias = set()
+#         for tarea in tareas_batch:
+#             cols = tarea["registro_cols"]
+#             if isinstance(cols, str):
+#                 columnas_necesarias.add(cols)
+#             else:
+#                 columnas_necesarias.update(cols)
+#         columnas_necesarias = list(columnas_necesarias)
+
+#         # 2️⃣ Preparar metadata de tareas para IA
+#         tareas_para_ia = []
+#         for tarea in tareas_batch:
+#             tareas_para_ia.append({
+#                 "columna": tarea["nueva_columna"],
+#                 "criterios": tarea["criterios"],
+#                 "registro_cols": tarea["registro_cols"]
+#             })
+
+#         # Procesar registros por batches
+#         for reg_indices in _chunk_list(df_out.index.tolist(), chunk_registros):
+
+#             # --- CLUSTERING: agrupar registros idénticos ---
+#             clusters = defaultdict(list)   # key → lista de ids
+#             registros_unicos = {}          # key → registro dict
+
+#             for idx in reg_indices:
+#                 row = df_out.loc[idx]
+#                 registro = {col: row[col] for col in columnas_necesarias}
+
+#                 # llave determinista para agrupar
+#                 key = tuple(registro[col] for col in columnas_necesarias)
+
+#                 clusters[key].append(idx)
+
+#                 # Guardar solo un ejemplo por grupo
+#                 if key not in registros_unicos:
+#                     registros_unicos[key] = registro
+
+#             # Construir registros compactados para IA
+#             registros_para_ia = []
+#             for group_id, (key, registro) in enumerate(registros_unicos.items()):
+#                 registros_para_ia.append({
+#                     "idx": f"G{group_id}",   # id sintético del grupo
+#                     "registro": registro
+#                 })
+
+#             # Payload final para IA
+#             payload = {
+#                 "Tareas": tareas_para_ia,
+#                 "Registros": registros_para_ia
+#             }
+
+#             # --- Llamar IA ---
+#             try:
+#                 respuesta = fn_ia(payload)
+#             except Exception as e:
+#                 print("Error IA:", e)
+#                 continue
+
+#             resultados = respuesta.get("Resultados", {})
+
+#             # --- Reasignar resultados a TODOS los ids del grupo ---
+#             for colname, lista_items in resultados.items():
+
+#                 # Mapa: id_ia → etiqueta
+#                 mapa_respuestas = {}
+#                 for item in lista_items:
+#                     id_ia = item.get("id", item.get("idx"))
+#                     val = item.get("resultado", item.get("etiqueta"))
+#                     mapa_respuestas[id_ia] = val
+
+#                 # Reaplicar resultados a cada grupo
+#                 for group_id, (key, _) in enumerate(registros_unicos.items()):
+#                     etiqueta = mapa_respuestas.get(f"G{group_id}")
+
+#                     if etiqueta is None:
+#                         continue
+
+#                     # asignar a todos los registros originales
+#                     for rid in clusters[key]:
+#                         if rid in df_out.index:
+#                             df_out.at[rid, colname] = etiqueta
+
+#     return df_out
 
 
 @register("aplicar_multiples_columnas_gpt5")
@@ -532,18 +1013,20 @@ def aplicar_multiples_columnas_gpt5(
     replace_existing: bool = True,
     chunk_tareas: int = 1,
     chunk_registros: int = 300,
+    max_workers: int = 8,
     debug: bool = False,
-    fn_ia = columns_batch_gpt5
+    fn_ia=columns_batch_gpt5
 ):
     """
-    Versión optimizada con CLUSTERING:
-    Agrupa registros con los mismos valores en columnas_necesarias
-    para reducir llamadas a IA sin alterar la lógica original.
+    Versión FINAL paralelizada.
+    - Mantiene clustering de registros
+    - Paraleliza llamadas IA (ThreadPoolExecutor)
+    - Reinyecta resultados de forma segura
     """
 
-    import json
-    import math
+    import concurrent.futures
     from collections import defaultdict
+    import itertools
 
     if not tareas:
         return df
@@ -552,18 +1035,24 @@ def aplicar_multiples_columnas_gpt5(
 
     def _chunk_list(lst, size):
         for i in range(0, len(lst), size):
-            yield lst[i:i+size]
+            yield lst[i:i + size]
 
-    # Inicializar columnas de salida
+    # -------------------------------------------------
+    # 1️⃣ Inicializar columnas de salida
+    # -------------------------------------------------
     for tarea in tareas:
         col = tarea["nueva_columna"]
         if col not in df_out.columns:
             df_out[col] = None
 
-    # Procesamiento por batches de tareas
+    # -------------------------------------------------
+    # 2️⃣ Construcción de JOBS (unidad paralelizable)
+    # -------------------------------------------------
+    jobs = []
+
     for tareas_batch in _chunk_list(tareas, chunk_tareas):
 
-        # 1️⃣ Determinar qué columnas necesita IA
+        # columnas necesarias para este batch
         columnas_necesarias = set()
         for tarea in tareas_batch:
             cols = tarea["registro_cols"]
@@ -573,79 +1062,103 @@ def aplicar_multiples_columnas_gpt5(
                 columnas_necesarias.update(cols)
         columnas_necesarias = list(columnas_necesarias)
 
-        # 2️⃣ Preparar metadata de tareas para IA
-        tareas_para_ia = []
-        for tarea in tareas_batch:
-            tareas_para_ia.append({
+        # metadata tareas IA
+        tareas_para_ia = [
+            {
                 "columna": tarea["nueva_columna"],
                 "criterios": tarea["criterios"],
                 "registro_cols": tarea["registro_cols"]
+            }
+            for tarea in tareas_batch
+        ]
+
+        for reg_indices in _chunk_list(df_out.index.tolist(), chunk_registros):
+            jobs.append({
+                "tareas_para_ia": tareas_para_ia,
+                "columnas_necesarias": columnas_necesarias,
+                "reg_indices": reg_indices
             })
 
-        # Procesar registros por batches
-        for reg_indices in _chunk_list(df_out.index.tolist(), chunk_registros):
+    # -------------------------------------------------
+    # 3️⃣ Función ejecutada en paralelo (PURA)
+    # -------------------------------------------------
+    def _procesar_job(job):
+        clusters = defaultdict(list)
+        registros_unicos = {}
 
-            # --- CLUSTERING: agrupar registros idénticos ---
-            clusters = defaultdict(list)   # key → lista de ids
-            registros_unicos = {}          # key → registro dict
+        # clustering
+        for idx in job["reg_indices"]:
+            row = df_out.loc[idx]
+            registro = {col: row[col] for col in job["columnas_necesarias"]}
+            key = tuple(registro[col] for col in job["columnas_necesarias"])
 
-            for idx in reg_indices:
-                row = df_out.loc[idx]
-                registro = {col: row[col] for col in columnas_necesarias}
+            clusters[key].append(idx)
+            if key not in registros_unicos:
+                registros_unicos[key] = registro
 
-                # llave determinista para agrupar
-                key = tuple(registro[col] for col in columnas_necesarias)
+        # registros compactados
+        registros_para_ia = []
+        for group_id, registro in enumerate(registros_unicos.values()):
+            registros_para_ia.append({
+                "idx": f"G{group_id}",
+                "registro": registro
+            })
 
-                clusters[key].append(idx)
+        payload = {
+            "Tareas": job["tareas_para_ia"],
+            "Registros": registros_para_ia
+        }
 
-                # Guardar solo un ejemplo por grupo
-                if key not in registros_unicos:
-                    registros_unicos[key] = registro
-
-            # Construir registros compactados para IA
-            registros_para_ia = []
-            for group_id, (key, registro) in enumerate(registros_unicos.items()):
-                registros_para_ia.append({
-                    "idx": f"G{group_id}",   # id sintético del grupo
-                    "registro": registro
-                })
-
-            # Payload final para IA
-            payload = {
-                "Tareas": tareas_para_ia,
-                "Registros": registros_para_ia
-            }
-
-            # --- Llamar IA ---
-            try:
-                respuesta = fn_ia(payload)
-            except Exception as e:
+        try:
+            respuesta = fn_ia(payload)
+        except Exception as e:
+            if debug:
                 print("Error IA:", e)
-                continue
+            return []
 
-            resultados = respuesta.get("Resultados", {})
+        resultados = respuesta.get("Resultados", {})
+        updates = []
 
-            # --- Reasignar resultados a TODOS los ids del grupo ---
-            for colname, lista_items in resultados.items():
+        # reconstrucción resultados → ids reales
+        for colname, lista_items in resultados.items():
+            mapa_respuestas = {}
+            for item in lista_items:
+                id_ia = item.get("id", item.get("idx"))
+                val = item.get("resultado", item.get("etiqueta"))
+                mapa_respuestas[id_ia] = val
 
-                # Mapa: id_ia → etiqueta
-                mapa_respuestas = {}
-                for item in lista_items:
-                    id_ia = item.get("id", item.get("idx"))
-                    val = item.get("resultado", item.get("etiqueta"))
-                    mapa_respuestas[id_ia] = val
+            for group_id, key in enumerate(registros_unicos.keys()):
+                etiqueta = mapa_respuestas.get(f"G{group_id}")
+                if etiqueta is None:
+                    continue
 
-                # Reaplicar resultados a cada grupo
-                for group_id, (key, _) in enumerate(registros_unicos.items()):
-                    etiqueta = mapa_respuestas.get(f"G{group_id}")
+                for rid in clusters[key]:
+                    updates.append((rid, colname, etiqueta))
 
-                    if etiqueta is None:
-                        continue
+        return updates
 
-                    # asignar a todos los registros originales
-                    for rid in clusters[key]:
-                        if rid in df_out.index:
-                            df_out.at[rid, colname] = etiqueta
+    # -------------------------------------------------
+    # 4️⃣ Ejecución paralela
+    # -------------------------------------------------
+    all_updates = []
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(_procesar_job, job) for job in jobs]
+
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                result = future.result()
+                all_updates.extend(result)
+            except Exception as e:
+                if debug:
+                    print("Error en job:", e)
+
+    # -------------------------------------------------
+    # 5️⃣ Aplicar resultados (hilo principal)
+    # -------------------------------------------------
+    for rid, colname, etiqueta in all_updates:
+        if rid in df_out.index:
+            df_out.at[rid, colname] = etiqueta
 
     return df_out
 

@@ -127,7 +127,7 @@ def informe_final(
     # data: ||...||
     _re_data = re.compile(r"\|\|.*?\|\|", re.S)
     # ia: +IA_  (al inicio de línea o en medio)
-    _re_ia   = re.compile(r"\+", re.I)
+    _re_ia   = re.compile(r"\+\s*(.*?)\s*\+", re.I)
     # plots: #GRAFICA# o #GRAFICO# o tus tags internos
     _re_plot = re.compile(r"#\s*(.*?)\s*#", re.I)
 
@@ -236,4 +236,4 @@ def informe_final(
         duracion = round(time.perf_counter() - t0, 4)
         logs.append(f"ERROR general: {e}")
         meta = {"status": "ERROR", "error": str(e), "duracion_seg": duracion, "logs": logs, "detalle": meta_detalle}
-        return "", meta
+        return "", meta, df_datos

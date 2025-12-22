@@ -63,7 +63,7 @@ SALIDA JSON ESPERADA
 - No agregues texto adicional, explicaciones ni comentarios.
 
 Con base a la siguiente INSTRUCCIÓN: {INSTRUCCION}
- devuelve el json con los analisis solicitados.
+ devuelve estrictamente la Salida JSON sin instrucciones o texto adicional.
 """
 client = openai.OpenAI(api_key=API_KEY)
   
@@ -470,7 +470,7 @@ Si hubiera varias instrucciones:
 
 FIN. SOLO JSON.
 
-Ejecución: Con base en la siguiente {INSTRUCCION} y las columnas {COLUMNAS_JSON}, interpreta y devuelve los parámetros técnicos en JSON.
+Ejecución: Con base en la siguiente {INSTRUCCION} y las columnas {COLUMNAS_JSON}, interpreta y devuelve los parámetros técnicos unicamente en el formato JSON de salida.
 """
 
 def _strip_code_fences(s: str) -> str:
@@ -713,8 +713,8 @@ Salida esperada:
 ]
 
 FIN. SOLO JSON.
-
-Ejecución: Con base en la siguiente {INSTRUCCION} y las columnas {COLUMNAS_JSON}, interpreta y devuelve los parámetros técnicos en JSON.
+No agregues texto adicional.
+Ejecución: Con base en la siguiente {INSTRUCCION} y las columnas {COLUMNAS_JSON}, interpreta y devuelve los parámetros técnicos unicamente en el formato JSON establecido.
 """
 
 @register("operaciones_gpt5")
@@ -1104,7 +1104,7 @@ def portada_gpt5(texto):
     subprompt = AG_P.replace("{texto}", texto)
     time.sleep(3)
     respuesta = client.chat.completions.create(
-        model="gpt-4.1",  # 👈 Aquí usas GPT-5 directamente
+        model="gpt-4.1-mini",  # 👈 Aquí usas GPT-5 directamente
         messages=[
             {"role": "system", "content": rol1},
             {"role": "user", "content": subprompt}

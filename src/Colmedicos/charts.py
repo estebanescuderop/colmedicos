@@ -1275,6 +1275,49 @@ def graficar_tabla(
     fig, ax = plt.subplots(figsize=(fig_w, fig_h), facecolor='white')
     ax.axis("off")
 
+    # ================= TABLA VISUAL (SOLO ESTILO) =================
+
+    table = ax.table(
+        cellText=df_formatted.values,
+        colLabels=df_formatted.columns,
+        cellLoc="left",
+        loc="center"
+    )
+
+    # --- Ajustes generales ---
+    table.auto_set_font_size(False)
+
+    # Fuente base más grande (ajustable)
+    BASE_FONT_SIZE = 14 if n_rows > 10 or fig_w > 20 else 12
+    table.set_fontsize(BASE_FONT_SIZE)
+
+    # Escalar tabla para evitar amontonamiento
+    table.scale(1.2, 1.4)
+
+    # --- Estilo de celdas ---
+    for (row, col), cell in table.get_celld().items():
+        # Bordes negros en TODAS las celdas
+        cell.set_edgecolor("black")
+        cell.set_linewidth(1)
+        cell.visible_edges = "closed"
+
+        # Altura de fila más cómoda
+        cell.set_height(0.08)
+
+        # Texto
+        text = cell.get_text()
+        text.set_wrap(True)
+        text.set_multialignment("left")
+
+        # Encabezados más destacados
+        if row == 0:
+            text.set_fontweight("bold")
+            text.set_fontsize(BASE_FONT_SIZE + 1)
+
+    # ==============================================================
+
+
+
     # === PREVENCIÓN DE TABLA VACÍA ===
     if df_formatted.empty:
         fig, ax = plt.subplots(figsize=(10, 2))
