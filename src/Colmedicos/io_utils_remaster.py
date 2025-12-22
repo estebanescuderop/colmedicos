@@ -188,155 +188,155 @@ def aplicar_ia_en_texto(texto: str, resultados_ia, formato: str = "html") -> str
     return out
 
 
-@register("process_ia_blocks")
-def process_ia_blocks(
-    texto: str,
-    *,
-    batch_size: int = 40,
-    max_workers: int = 1,
-    debug: bool = False,
-) -> str:
-    """
-    Versión FINAL optimizada de bloques IA (+ ... +)
-
-    - Batching de instrucciones (optimiza costo)
-    - Paralelización de llamadas IA (optimiza tiempo)
-    - Orden y spans deterministas
-    - Fallback seguro ante errores/cuota
-    """
-
-    import concurrent.futures
-    import json
-
-    # -------------------------------------------------
-    # 1️⃣ Extraer bloques
-    # -------------------------------------------------
-    extract = extraer_ia_blocks(texto)
-    if not extract:
-        return texto
-
-    def _chunk_list(lst, size):
-        for i in range(0, len(lst), size):
-            yield lst[i:i + size]
-
-    # -------------------------------------------------
-    # 2️⃣ Crear batches
-    # -------------------------------------------------
-    batches = list(_chunk_list(extract, batch_size))
-
-    # -------------------------------------------------
-    # 3️⃣ Job IA (batch)
-    # -------------------------------------------------
-    def _procesar_batch(batch):
-        try:
-            out = ask_gpt5(batch)
-
-            if isinstance(out, str):
-                try:
-                    out = _json_loads_loose(out)
-                except Exception as e:
-                    if debug:
-                        print("Error parseando IA JSON:", e)
-                    return []
-
-        except Exception as e:
-            if debug:
-                print("Error IA batch:", e)
-            return []
-
-        if not isinstance(out, list):
-            return []
-
-        return out  # [{idx, params, span}, ...]
-
-    # -------------------------------------------------
-    # 4️⃣ Ejecutar IA en paralelo
-    # -------------------------------------------------
-    resultados_por_idx = {}
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [executor.submit(_procesar_batch, batch) for batch in batches]
-
-        for future in concurrent.futures.as_completed(futures):
-            try:
-                out_batch = future.result()
-                for item in out_batch:
-                    if isinstance(item, dict) and "params" in item:
-                        resultados_por_idx[item["idx"]] = item
-            except Exception as e:
-                if debug:
-                    print("Error future IA:", e)
-
-    # -------------------------------------------------
-    # 5️⃣ Reemplazar en texto (SECUENCIAL)
-    # -------------------------------------------------
-    resultados_ia = []
-
-    for bloque in sorted(extract, key=lambda b: b["idx"]):
-        idx = bloque["idx"]
-        span = bloque["span"]
-
-        item = resultados_por_idx.get(idx)
-        if not item:
-            continue
-
-        params = item.get("params")
-
-        try:
-            resultados_ia.append((idx, bloque["prompt"], span, params))
-        except Exception as e:
-            resultados_ia.append((idx, bloque["prompt"], span, f"[error:{str(e)}]"))
-
-    texto_reemplazado = aplicar_ia_en_texto(
-        texto,
-        resultados_ia,
-        formato="html"
-    )
-
-    return texto_reemplazado
-
-
 # @register("process_ia_blocks")
 # def process_ia_blocks(
-#     texto: str # "raise" | "return_input"
+#     texto: str,
+#     *,
+#     batch_size: int = 40,
+#     max_workers: int = 1,
+#     debug: bool = False,
 # ) -> str:
+#     """
+#     Versión FINAL optimizada de bloques IA (+ ... +)
 
-#    # 1) Ejecutar operaciones_gpt5 y asegurar conversión a JSON con spans
+#     - Batching de instrucciones (optimiza costo)
+#     - Paralelización de llamadas IA (optimiza tiempo)
+#     - Orden y spans deterministas
+#     - Fallback seguro ante errores/cuota
+#     """
+
+#     import concurrent.futures
+#     import json
+
+#     # -------------------------------------------------
+#     # 1️⃣ Extraer bloques
+#     # -------------------------------------------------
 #     extract = extraer_ia_blocks(texto)
-#     out = ask_gpt5(extract)
- 
-#     if isinstance(out, str):
+#     if not extract:
+#         return texto
+
+#     def _chunk_list(lst, size):
+#         for i in range(0, len(lst), size):
+#             yield lst[i:i + size]
+
+#     # -------------------------------------------------
+#     # 2️⃣ Crear batches
+#     # -------------------------------------------------
+#     batches = list(_chunk_list(extract, batch_size))
+
+#     # -------------------------------------------------
+#     # 3️⃣ Job IA (batch)
+#     # -------------------------------------------------
+#     def _procesar_batch(batch):
 #         try:
-#             out = json.loads(out)
-#         except json.JSONDecodeError as e:
-#             raise ValueError(f"JSON inválido: {e}") from e
+#             out = ask_gpt5(batch)
 
-#     if not isinstance(out, list):
-#         raise TypeError("El resultado de operaciones_gpt5 debe ser una lista de objetos JSON.")
+#             if isinstance(out, str):
+#                 try:
+#                     out = _json_loads_loose(out)
+#                 except Exception as e:
+#                     if debug:
+#                         print("Error parseando IA JSON:", e)
+#                     return []
 
-#     resultados_ops: List[
-#         Tuple[int, Dict[str, Any], Union[Tuple[int, int], None], str]
-#     ] = []
+#         except Exception as e:
+#             if debug:
+#                 print("Error IA batch:", e)
+#             return []
 
+#         if not isinstance(out, list):
+#             return []
 
-#     # 2) Ejecutar cada operación y formatear resultado
-#     for item in out:
-#         if isinstance(item, dict) and "params" in item:
-#             idx = item.get("idx")
-#             params = item.get("params")
-#             span = item.get("span")
+#         return out  # [{idx, params, span}, ...]
 
+#     # -------------------------------------------------
+#     # 4️⃣ Ejecutar IA en paralelo
+#     # -------------------------------------------------
+#     resultados_por_idx = {}
+
+#     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+#         futures = [executor.submit(_procesar_batch, batch) for batch in batches]
+
+#         for future in concurrent.futures.as_completed(futures):
 #             try:
-#                 resultado_fmt = params
-#                 resultados_ops.append((idx, params, span, resultado_fmt))
+#                 out_batch = future.result()
+#                 for item in out_batch:
+#                     if isinstance(item, dict) and "params" in item:
+#                         resultados_por_idx[item["idx"]] = item
 #             except Exception as e:
-#                 # Mantener trazabilidad sin romper el tipo (resultado como string legible)
-#                 error_txt = f"[error:{str(e)}]"
-#                 resultados_ops.append((idx, params, span, error_txt))
-    
-#     # 3) Reemplazar spans por resultados (elige "html" o "texto simple")
-#     texto_reemplazado = aplicar_ia_en_texto(texto, resultados_ops, formato="html")
+#                 if debug:
+#                     print("Error future IA:", e)
+
+#     # -------------------------------------------------
+#     # 5️⃣ Reemplazar en texto (SECUENCIAL)
+#     # -------------------------------------------------
+#     resultados_ia = []
+
+#     for bloque in sorted(extract, key=lambda b: b["idx"]):
+#         idx = bloque["idx"]
+#         span = bloque["span"]
+
+#         item = resultados_por_idx.get(idx)
+#         if not item:
+#             continue
+
+#         params = item.get("params")
+
+#         try:
+#             resultados_ia.append((idx, bloque["prompt"], span, params))
+#         except Exception as e:
+#             resultados_ia.append((idx, bloque["prompt"], span, f"[error:{str(e)}]"))
+
+#     texto_reemplazado = aplicar_ia_en_texto(
+#         texto,
+#         resultados_ia,
+#         formato="html"
+#     )
+
 #     return texto_reemplazado
+
+
+@register("process_ia_blocks")
+def process_ia_blocks(
+    texto: str # "raise" | "return_input"
+) -> str:
+
+   # 1) Ejecutar operaciones_gpt5 y asegurar conversión a JSON con spans
+    extract = extraer_ia_blocks(texto)
+    out = ask_gpt5(extract)
+ 
+    if isinstance(out, str):
+        try:
+            out = json.loads(out)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"JSON inválido: {e}") from e
+
+    if not isinstance(out, list):
+        raise TypeError("El resultado de operaciones_gpt5 debe ser una lista de objetos JSON.")
+
+    resultados_ops: List[
+        Tuple[int, Dict[str, Any], Union[Tuple[int, int], None], str]
+    ] = []
+
+
+    # 2) Ejecutar cada operación y formatear resultado
+    for item in out:
+        if isinstance(item, dict) and "params" in item:
+            idx = item.get("idx")
+            params = item.get("params")
+            span = item.get("span")
+
+            try:
+                resultado_fmt = params
+                resultados_ops.append((idx, params, span, resultado_fmt))
+            except Exception as e:
+                # Mantener trazabilidad sin romper el tipo (resultado como string legible)
+                error_txt = f"[error:{str(e)}]"
+                resultados_ops.append((idx, params, span, error_txt))
+    
+    # 3) Reemplazar spans por resultados (elige "html" o "texto simple")
+    texto_reemplazado = aplicar_ia_en_texto(texto, resultados_ops, formato="html")
+    return texto_reemplazado
 
 # ----------------------------
 # 5) Función que calcula DATOS.
@@ -728,155 +728,155 @@ def _json_loads_loose(s: str) -> Any:
         raise
 
 
-def process_plot_blocks(
-    df: pd.DataFrame,
-    texto: str,
-    *,
-    batch_size: int = 8,
-    max_workers: int = 2,
-    debug: bool = False,
-):
-    """
-    Versión FINAL paralelizada del orquestador de GRÁFICAS:
+# def process_plot_blocks(
+#     df: pd.DataFrame,
+#     texto: str,
+#     *,
+#     batch_size: int = 8,
+#     max_workers: int = 2,
+#     debug: bool = False,
+# ):
+#     """
+#     Versión FINAL paralelizada del orquestador de GRÁFICAS:
 
-    - Batching de bloques #...# (optimiza costo IA)
-    - Paralelización de graficos_gpt5 (optimiza tiempo)
-    - Render de gráficas y reemplazo determinista
-    """
+#     - Batching de bloques #...# (optimiza costo IA)
+#     - Paralelización de graficos_gpt5 (optimiza tiempo)
+#     - Render de gráficas y reemplazo determinista
+#     """
 
-    import concurrent.futures
-    import json
+#     import concurrent.futures
+#     import json
 
-    # -------------------------------------------------
-    # 1️⃣ Extraer bloques
-    # -------------------------------------------------
-    extract = extraer_plot_blocks(texto)
-    if not extract:
-        return texto
-
-    def _chunk_list(lst, size):
-        for i in range(0, len(lst), size):
-            yield lst[i:i + size]
-
-    # -------------------------------------------------
-    # 2️⃣ Crear batches
-    # -------------------------------------------------
-    batches = list(_chunk_list(extract, batch_size))
-
-    # -------------------------------------------------
-    # 3️⃣ Job IA (batch)
-    # -------------------------------------------------
-    def _procesar_batch(batch):
-        try:
-            out = graficos_gpt5(df, batch)
-            if isinstance(out, str):
-                try:
-                    out = _json_loads_loose(out)
-                except Exception as e:
-                    if debug:
-                        print("Error parseando JSON gráficos:", e)
-                    return []
-
-            if not isinstance(out, list):
-                return []
-        except Exception as e:
-            if debug:
-                print("Error IA graficos batch:", e)
-            return []
-
-        if not isinstance(out, list):
-            return []
-
-        return out  # [{idx, params, span}...]
-
-    # -------------------------------------------------
-    # 4️⃣ Ejecutar IA en paralelo
-    # -------------------------------------------------
-    resultados_por_idx = {}
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [executor.submit(_procesar_batch, batch) for batch in batches]
-
-        for future in concurrent.futures.as_completed(futures):
-            try:
-                out_batch = future.result()
-                for item in out_batch:
-                    if isinstance(item, dict) and "params" in item:
-                        resultados_por_idx[item["idx"]] = item
-            except Exception as e:
-                if debug:
-                    print("Error future gráficos:", e)
-
-    # -------------------------------------------------
-    # 5️⃣ Renderizar gráficas (SECUENCIAL)
-    # -------------------------------------------------
-    resultados_graficos = []
-
-    for bloque in sorted(extract, key=lambda b: b["idx"]):
-        idx = bloque["idx"]
-        span = bloque["span"]
-
-        item = resultados_por_idx.get(idx)
-        if not item:
-            continue
-
-        params = item.get("params")
-
-        try:
-            fig, ax = plot_from_params(df, params)
-            uri = _fig_to_data_uri(fig)
-            resultados_graficos.append((idx, params, span, uri))
-        except Exception as e:
-            error_uri = f"data:text/plain;base64,{_to_base64(f'error:{str(e)}')}"
-            resultados_graficos.append((idx, params, span, error_uri))
-
-    # -------------------------------------------------
-    # 6️⃣ Reemplazar en texto
-    # -------------------------------------------------
-    texto_reemplazado = aplicar_graficos_en_texto(
-        texto,
-        resultados_graficos,
-        formato="html"
-    )
-
-    return texto_reemplazado
-
-
-# def process_plot_blocks(df: pd.DataFrame, texto: str):
-#     # Ejecutar graficos_gpt5 y asegurar conversión a JSON
+#     # -------------------------------------------------
+#     # 1️⃣ Extraer bloques
+#     # -------------------------------------------------
 #     extract = extraer_plot_blocks(texto)
-#     out = graficos_gpt5(df, extract)
-#     if isinstance(out, str):
+#     if not extract:
+#         return texto
+
+#     def _chunk_list(lst, size):
+#         for i in range(0, len(lst), size):
+#             yield lst[i:i + size]
+
+#     # -------------------------------------------------
+#     # 2️⃣ Crear batches
+#     # -------------------------------------------------
+#     batches = list(_chunk_list(extract, batch_size))
+
+#     # -------------------------------------------------
+#     # 3️⃣ Job IA (batch)
+#     # -------------------------------------------------
+#     def _procesar_batch(batch):
 #         try:
-#             out = json.loads(out)
-#         except json.JSONDecodeError as e:
-#             raise ValueError(f"JSON inválido: {e}") from e
+#             out = graficos_gpt5(df, batch)
+#             if isinstance(out, str):
+#                 try:
+#                     out = _json_loads_loose(out)
+#                 except Exception as e:
+#                     if debug:
+#                         print("Error parseando JSON gráficos:", e)
+#                     return []
 
-#     # Validar tipo
-#     if not isinstance(out, list):
-#         raise TypeError("El resultado de graficos_gpt5 debe ser una lista de objetos JSON.")
+#             if not isinstance(out, list):
+#                 return []
+#         except Exception as e:
+#             if debug:
+#                 print("Error IA graficos batch:", e)
+#             return []
 
-#     params_list = []
-#     resultados_graficos: List[
-#         Tuple[int, Dict[str, Any], Union[Tuple[int, int], None], Union[str, Dict[str, str]]]
-#     ] = []
-#     for item in out:
-#         if isinstance(item, dict) and "params" in item:
-#             idx, params, span = item["idx"], item["params"], item["span"]
-#             params_list.append(params)
+#         if not isinstance(out, list):
+#             return []
+
+#         return out  # [{idx, params, span}...]
+
+#     # -------------------------------------------------
+#     # 4️⃣ Ejecutar IA en paralelo
+#     # -------------------------------------------------
+#     resultados_por_idx = {}
+
+#     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+#         futures = [executor.submit(_procesar_batch, batch) for batch in batches]
+
+#         for future in concurrent.futures.as_completed(futures):
 #             try:
-#                 fig, ax = plot_from_params(df, params)
-#                 resultados = _fig_to_data_uri(fig)
-#                 resultados_graficos.append((idx, params, span, resultados))
+#                 out_batch = future.result()
+#                 for item in out_batch:
+#                     if isinstance(item, dict) and "params" in item:
+#                         resultados_por_idx[item["idx"]] = item
 #             except Exception as e:
-#                 # En caso de error, aún registramos la entrada para trazabilidad (sin romper el tipo)
-#                 error_uri = f"data:text/plain;base64,{_to_base64(f'error:{str(e)}')}"
-#                 resultados_graficos.append((idx, params, span, error_uri))
+#                 if debug:
+#                     print("Error future gráficos:", e)
 
-#     # 3) Reemplazar spans por data-URIs (elige el formato que prefieras: "uri" | "md" | "html")
-#     texto_reemplazado = aplicar_graficos_en_texto(texto, resultados_graficos, formato="html")
+#     # -------------------------------------------------
+#     # 5️⃣ Renderizar gráficas (SECUENCIAL)
+#     # -------------------------------------------------
+#     resultados_graficos = []
+
+#     for bloque in sorted(extract, key=lambda b: b["idx"]):
+#         idx = bloque["idx"]
+#         span = bloque["span"]
+
+#         item = resultados_por_idx.get(idx)
+#         if not item:
+#             continue
+
+#         params = item.get("params")
+
+#         try:
+#             fig, ax = plot_from_params(df, params)
+#             uri = _fig_to_data_uri(fig)
+#             resultados_graficos.append((idx, params, span, uri))
+#         except Exception as e:
+#             error_uri = f"data:text/plain;base64,{_to_base64(f'error:{str(e)}')}"
+#             resultados_graficos.append((idx, params, span, error_uri))
+
+#     # -------------------------------------------------
+#     # 6️⃣ Reemplazar en texto
+#     # -------------------------------------------------
+#     texto_reemplazado = aplicar_graficos_en_texto(
+#         texto,
+#         resultados_graficos,
+#         formato="html"
+#     )
 
 #     return texto_reemplazado
+
+
+def process_plot_blocks(df: pd.DataFrame, texto: str):
+    # Ejecutar graficos_gpt5 y asegurar conversión a JSON
+    extract = extraer_plot_blocks(texto)
+    out = graficos_gpt5(df, extract)
+    if isinstance(out, str):
+        try:
+            out = json.loads(out)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"JSON inválido: {e}") from e
+
+    # Validar tipo
+    if not isinstance(out, list):
+        raise TypeError("El resultado de graficos_gpt5 debe ser una lista de objetos JSON.")
+
+    params_list = []
+    resultados_graficos: List[
+        Tuple[int, Dict[str, Any], Union[Tuple[int, int], None], Union[str, Dict[str, str]]]
+    ] = []
+    for item in out:
+        if isinstance(item, dict) and "params" in item:
+            idx, params, span = item["idx"], item["params"], item["span"]
+            params_list.append(params)
+            try:
+                fig, ax = plot_from_params(df, params)
+                resultados = _fig_to_data_uri(fig)
+                resultados_graficos.append((idx, params, span, resultados))
+            except Exception as e:
+                # En caso de error, aún registramos la entrada para trazabilidad (sin romper el tipo)
+                error_uri = f"data:text/plain;base64,{_to_base64(f'error:{str(e)}')}"
+                resultados_graficos.append((idx, params, span, error_uri))
+
+    # 3) Reemplazar spans por data-URIs (elige el formato que prefieras: "uri" | "md" | "html")
+    texto_reemplazado = aplicar_graficos_en_texto(texto, resultados_graficos, formato="html")
+
+    return texto_reemplazado
 
 
 # @register("aplicar_multiples_columnas_gpt5")
