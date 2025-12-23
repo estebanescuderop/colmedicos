@@ -165,7 +165,6 @@ tareas = [
       "registro_cols": "espirometria",
       "nueva_columna": "espirometria"
     },
-
     {
       "criterios": {
         "NO REALIZADA.": "Se usa cuando la prueba no fue realizada o se indica que no aplica, independientemente de la variación en la redacción.",
@@ -296,7 +295,6 @@ inf, meta, df_datico = informe_final(df,
                           campos_a_extraer=campos,
                           renombrar_campos=renombres
                           )
-
 
 # # # # # Ruta del archivo Excel
 # # ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\Informe pruebas colmedicos\Prueba_mult_registros.xlsx"

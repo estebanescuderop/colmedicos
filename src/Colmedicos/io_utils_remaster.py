@@ -2193,3 +2193,29 @@ def process_titulo_blocks(texto: str) -> str:
         raise RuntimeError(f"Error al reemplazar títulos numerados: {e}")
 
     return texto_final, tabla_contenido
+import re
+
+def remover_contenedores_apendice(html: str) -> str:
+    """
+    Elimina únicamente las etiquetas <div class="Apendice N"> y </div> 
+    sin afectar el contenido, incluso cuando las etiquetas están
+    mal anidadas dentro de <p>.
+    """
+
+    # 1. Eliminar aperturas de div tipo: <div class="Apendice 7"> o <div class='Apendice 3'>
+    html = re.sub(
+        r'<div\s+class=["\']Apendice\s+\d+["\'][^>]*>',
+        '',
+        html,
+        flags=re.IGNORECASE
+    )
+
+    # 2. Eliminar cualquier cierre </div> (solo esos div se usan en tu informe)
+    html = re.sub(
+        r'</div\s*>',
+        '',
+        html,
+        flags=re.IGNORECASE
+    )
+
+    return html

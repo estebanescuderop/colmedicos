@@ -931,7 +931,7 @@ NIVEL 2
   y aparece después de un NIVEL 1.
 
 Reglas rígidas:
-- Un título completamente en mayúsculas → NIVEL 1.
+- Un título completamente en mayúsculas siempre será → NIVEL 1.
 - Un título que NO está completamente en mayúsculas → NIVEL 2.
 - Los subtítulos pertenecen SIEMPRE al último título NIVEL 1 detectado.
 - No existen niveles 3 ni superiores.
@@ -983,10 +983,27 @@ Reglas estrictas:
 - No agregues explicaciones.
 - No cambies los valores de span.
 - No modifiques el texto del título original.
+- Recuerda que SIEMPRE los subtitulos son en minuscula, si no aparece así, tomalo como un titulo
 - No incluyas texto fuera del JSON.
 
 ================================================================
-4. INSTRUCCIÓN FINAL
+4. REGLA IMPORTANTE FINAL
+================================================================
+
+Para los titulos:
+  - INTRODUCCION
+  - MARCO LEGAL
+  - OBJETIVOS
+    - Objetivos general
+    - Objetivos especificos
+  - CARACTERISTICAS DE LA EMPRESA
+  - METODOLOGÍA
+  - MATERIALES Y MÉTODOS
+no generes un consecutivo, empieza a generar consecutivo a partir de los siguientes titulos y subtitulos posteriores a este.
+
+
+================================================================
+5. INSTRUCCIÓN FINAL
 ================================================================
 
 Con base en el arreglo {titulos}, devuelve ÚNICAMENTE el JSON estructurado

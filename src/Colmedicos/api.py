@@ -2,7 +2,7 @@
 from Colmedicos.ia import ask_gpt5
 from Colmedicos.io_utils import generar_output, aplicar_data_por_tipo_desde_output, aplicar_ia_por_tipo, aplicar_plot_por_tipo_desde_output, exportar_output_a_html, mostrar_html, limpiar_output_dataframe
 from Colmedicos.registry import register
-from Colmedicos.io_utils_remaster import process_ia_blocks, process_data_blocks, process_plot_blocks, _render_vars_text, exportar_output_a_html, _fig_to_data_uri, _format_result_plain, columnas_a_texto,aplicar_multiples_columnas_gpt5, limpieza_final,  unpivot_df, dividir_columna_en_dos, procesar_codigos_cie10, unir_dataframes, expand_json_column, procesar_apendices, process_titulo_blocks
+from Colmedicos.io_utils_remaster import process_ia_blocks, process_data_blocks, process_plot_blocks, _render_vars_text, exportar_output_a_html, _fig_to_data_uri, _format_result_plain, columnas_a_texto,aplicar_multiples_columnas_gpt5, limpieza_final,  unpivot_df, dividir_columna_en_dos, procesar_codigos_cie10, unir_dataframes, expand_json_column, procesar_apendices, process_titulo_blocks, remover_contenedores_apendice
 import pandas as pd
 
 # Colmedicos/api.py
@@ -206,7 +206,7 @@ def informe_final(
         else:
             logs.append("Procesamiento de gráficas: SKIP (sin tokens)")
 
-
+        text_for_next = remover_contenedores_apendice(text_for_next)
         #text_for_next = limpieza_final(text_for_next)
         
         # 5) Exportar HTML (evitar E/S si no se requiere)
