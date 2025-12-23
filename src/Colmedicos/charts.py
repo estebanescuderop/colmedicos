@@ -13,6 +13,14 @@ from typing import List, Dict, Any, Tuple, Optional, Union
 import unicodedata
 from pandas.api.types import is_numeric_dtype, is_datetime64_any_dtype
 
+
+
+def _normalize(text: str) -> str:
+    if text is None:
+        return ""
+    return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode().lower()
+
+
 # ---- Operadores soportados ----
 _OPS = {
     '>':  lambda a, b: a > b,
@@ -23,6 +31,17 @@ _OPS = {
     '<=': lambda a, b: a <= b,
     'in':     lambda a, b: a.isin(b),
     'not in': lambda a, b: ~a.isin(b),
+
+    # 🔥 NUEVOS OPERADORES PARA TEXTO
+    "contains": lambda a, b: a.astype(str).str.contains(b, case=False, na=False),
+    "startswith": lambda a, b: a.astype(str).str.startswith(b, na=False),
+    "endswith": lambda a, b: a.astype(str).str.endswith(b, na=False),
+
+    # LIKE estilo SQL
+    "like": lambda a, b: a.astype(str).str.contains(b.replace("%", ""), case=False, na=False),
+
+    # Versión insensible a tildes
+    "icontains": lambda a, b: a.astype(str).apply(lambda x: _normalize(x)).str.contains(_normalize(b), case=False, na=False),
 }
 
 def _to_numeric_like(series: pd.Series) -> pd.Series:
@@ -478,10 +497,10 @@ def graficar_barras(
         colname = df_plot.columns[0]
 
         if color is None or isinstance(color, str):
-            base_color = color if isinstance(color, str) else '#5A6C7D'
+            base_color = color if isinstance(color, str) else "#2238FF"
             bar_colors = base_color
         else:
-            bar_colors = color[0] if color else '#5A6C7D'
+            bar_colors = color[0] if color else "#3B2DFF"
 
         bars = ax.bar(
             df_plot.index.astype(str),
@@ -567,7 +586,7 @@ def graficar_barras(
             return color[idx]
         if isinstance(color, str):
             return color
-        palette = ["#1A4F80", "#1a9422", "#e0830a", "#eff312",
+        palette = ["#1F2EB8", "#1a9422", "#e0830a", "#eff312",
                 '#8e44ad', '#16a085', '#c0392b', '#7f8c8d']
         return palette[idx % len(palette)]
 
@@ -636,7 +655,7 @@ def graficar_torta(
     y: Optional[str] = None,
     agg: Union[str, Dict[str, str]] = "sum",
     titulo: str = "Gráfico de Torta",
-    color: Optional[Union[str, List[str]]] = None,
+    color: Optional[Union[str, List[str], Dict[str, str]]] = None,
     *,
     unique_by: Optional[Union[str, List[str]]] = None,
     conditions_all: Optional[List[List[Any]]] = None,
@@ -645,6 +664,9 @@ def graficar_torta(
     drop_dupes_before_sum: bool = False,
     sort: Optional[Dict[str, str]] = None,
     limit_categories: Optional[int] = None,
+    # 👇 NUEVO: mapa etiqueta → color, ej:
+    # {"Riesgo Alto":"#FF0000", "Riesgo Moderado":"#FFFF00", "Riesgo Bajo":"#00AA00"}
+    colors_by_category: Optional[Dict[str, str]] = None,
 ) -> Tuple[plt.Figure, plt.Axes]:
 
     if not isinstance(df, pd.DataFrame):
@@ -744,16 +766,30 @@ def graficar_torta(
     # ------------------------------
     # Determinar colores
     # ------------------------------
-    if color is None:
-        cmap = plt.get_cmap("tab20")
-        color = [cmap(i % cmap.N) for i in range(len(serie))]
-    elif isinstance(color, str):
-        color = [color] * len(serie)
-    elif isinstance(color, (list, tuple)):
-        color = list(color)
-        if len(color) < len(serie):
-            reps = int(np.ceil(len(serie) / len(color)))
-            color = (color * reps)[:len(serie)]
+    # 1) Caso: color es un dict etiqueta → color (lo usamos directo)
+    cmap_dict: Optional[Dict[str, str]] = None
+    if isinstance(color, dict):
+        cmap_dict = color
+    elif colors_by_category:
+        # 2) Caso: viene en parámetro separado
+        cmap_dict = colors_by_category
+
+    if cmap_dict is not None:
+        # Mapeamos cada etiqueta a su color; si no está en el dict, usamos un fallback
+        default_color = "#1A4F80"
+        color = [cmap_dict.get(lbl, default_color) for lbl in etiquetas]
+    else:
+        # 3) Caso clásico: color = None / str / lista
+        if color is None:
+            cmap = plt.get_cmap("tab20")
+            color = [cmap(i % cmap.N) for i in range(len(serie))]
+        elif isinstance(color, str):
+            color = [color] * len(serie)
+        elif isinstance(color, (list, tuple)):
+            color = list(color)
+            if len(color) < len(serie):
+                reps = int(np.ceil(len(serie) / len(color)))
+                color = (color * reps)[:len(serie)]
 
     # ------------------------------
     # Crear figura
@@ -776,6 +812,7 @@ def graficar_torta(
 
     fig.tight_layout()
     return fig, ax
+
 
 
 def graficar_barras_horizontal(
@@ -885,7 +922,7 @@ def graficar_barras_horizontal(
         colname = df_plot.columns[0]
 
         if color is None or isinstance(color, str):
-            bar_color = color if isinstance(color, str) else '#607D8B'
+            bar_color = color if isinstance(color, str) else "#332FF7"
         else:
             bar_color = color[0]
 
@@ -963,8 +1000,8 @@ def graficar_barras_horizontal(
             return color[idx]
         if isinstance(color, str):
             return color
-        palette = ['#607D8B', '#0e4a8f', '#58b12e', '#f39c12',
-                   '#8e44ad', '#16a085', '#c0392b']
+        palette = ["#3327E7", "#dd6666", '#58b12e', '#f39c12',
+                   '#8e44ad', '#16a085', "#fffc39"]
         return palette[idx % len(palette)]
 
     for i, serie in enumerate(legend_values):
@@ -1036,11 +1073,10 @@ def graficar_tabla(
     legend_col: Optional[str] = None,
     # 👇 NUEVO PARAMETRO multiples métricas
     extra_measures: Optional[List[Dict[str, Any]]] = None,
-    hide_main_measure=False, 
-    add_total_row = False,
-    add_total_column = False
+    hide_main_measure: bool = False,
+    add_total_row: bool = False,
+    add_total_column: bool = False,
 ) -> Tuple[plt.Figure, plt.Axes]:
-
     """
     Tabla con:
       - xlabel como str o list[str] (se combina con _ensure_xlabel)
@@ -1074,7 +1110,7 @@ def graficar_tabla(
         df2,
         unique_by=unique_by,
         conditions_all=conditions_all,
-        conditions_any=conditions_any
+        conditions_any=conditions_any,
     )
 
     # --- Preparar claves de agrupación (X + legend_col opcional) ---
@@ -1098,7 +1134,7 @@ def graficar_tabla(
         agg=agg,
         distinct_on=distinct_on,
         drop_dupes_before_sum=drop_dupes_before_sum,
-        where=where
+        where=where,
     )
 
     # Si es Series → DataFrame
@@ -1123,13 +1159,11 @@ def graficar_tabla(
         # Reset index normal
         df_plot = df_plot.reset_index() if group_x is not None else df_plot.reset_index(drop=True)
 
-    
     # ============================================================
     # Procesar extra_measures (múltiples agregaciones)
     # ============================================================
     if extra_measures:
         for measure in extra_measures:
-
             col_name = measure.get("name")
             if not col_name:
                 raise ValueError("Cada 'extra_measure' debe incluir 'name'.")
@@ -1160,7 +1194,7 @@ def graficar_tabla(
                 agg=agg_m,
                 distinct_on=distinct_m,
                 drop_dupes_before_sum=drop_dupes_before_sum,
-                where=where
+                where=where,
             )
 
             # Normalizar a DataFrame
@@ -1196,13 +1230,13 @@ def graficar_tabla(
 
         # Filtrar
         df_plot = df_plot[keep_cols]
-    # ===========================================================
 
-    # === TOP-N + Otros (lógica unificada para tablas simples o pivotadas) ===
+    # ===========================================================
+    # TOP-N + Otros
+    # ===========================================================
     if limit_categories and limit_categories > 0:
         # La primera columna SIEMPRE es la etiqueta (tras pivot/reset)
         label_col = df_plot.columns[0]
-        # Aplicar la función universal
         df_plot = _apply_top_n_general(df_plot, label_col, limit_categories)
 
     # --- Columna de porcentaje opcional (solo cuando NO hay pivot por legend_col) ---
@@ -1214,25 +1248,21 @@ def graficar_tabla(
         if total and not np.isnan(total):
             df_plot[percentage_colname] = np.where(
                 col_num.notna(),
-                col_num / total,   # proporción (0.45 → 45%)
+                col_num / total,  # proporción (0.45 → 45%)
                 np.nan,
             )
         else:
             df_plot[percentage_colname] = np.nan
-    
+
     if add_total_row:
         numeric_cols = df_plot.select_dtypes(include=[np.number]).columns
-
         if len(numeric_cols) > 0:
             total_row = df_plot[numeric_cols].sum()
-            # la primera columna siempre es la etiqueta
             first_col = df_plot.columns[0]
             total_row[first_col] = "TOTAL"
-
-            # Convertimos a DataFrame para concatenar
             total_df = pd.DataFrame([total_row])
             df_plot = pd.concat([df_plot, total_df], ignore_index=True)
-    
+
     if add_total_column:
         numeric_cols = df_plot.select_dtypes(include=[np.number]).columns
         if len(numeric_cols) > 0:
@@ -1246,102 +1276,84 @@ def graficar_tabla(
                 df_display[col] = df_display[col].round(2)
         elif is_datetime64_any_dtype(df_display[col]):
             df_display[col] = df_display[col].dt.strftime("%Y-%m-%d")
-    df_display = df_display.fillna("").astype(str)
+    # Llenar NA numéricos con 0 y convertir todo a string después
+    df_numeric_filled = df_plot.copy()
+
+    for col in df_numeric_filled.columns:
+        # si la columna es numérica → llenar NA con 0
+        if pd.api.types.is_numeric_dtype(df_numeric_filled[col]):
+            df_numeric_filled[col] = df_numeric_filled[col].fillna(0)
+        else:
+            # si no es numérica, llenar NA con "" (texto vacío)
+            df_numeric_filled[col] = df_numeric_filled[col].fillna("")
+
+    # Convertir todo a string para el render final
+    df_display = df_numeric_filled.astype(str)
+
+    def _format_number(x):
+        if pd.isna(x):
+            return ""
+        if x == 0:
+            return "0"           # 👈 NUEVA REGLA
+        if x >= 1:
+            return f"{x:,.0f}"
+        return f"{x:.2f}"
 
     # Formatear números con separador de miles y porcentajes
     df_formatted = df_display.copy()
     for col in df_display.columns:
         try:
-            numeric_col = pd.to_numeric(df_display[col], errors='coerce')
+            numeric_col = pd.to_numeric(df_display[col], errors="coerce")
             if numeric_col.notna().any():
                 if col == percentage_colname:
                     df_formatted[col] = numeric_col.apply(
                         lambda x: f"{x:.0%}" if pd.notna(x) else ""
                     )
                 else:
-                    df_formatted[col] = numeric_col.apply(
-                        lambda x: f"{x:,.0f}" if pd.notna(x) and x >= 1 else
-                                 (f"{x:.2f}" if pd.notna(x) else "")
-                    )
+                    df_formatted[col] = numeric_col.apply(_format_number)
         except Exception:
             pass
 
-    # ========= Figura y tabla (una sola vez, sin duplicados) =========
+    # ========= Figura y tabla =========
     n_cols = len(df_formatted.columns)
     n_rows = len(df_formatted)
-    fig_w = max(18, n_cols * 1)
-    fig_h = max(9, n_rows * 1)
 
-    fig, ax = plt.subplots(figsize=(fig_w, fig_h), facecolor='white')
+    # Ancho/alto base de la figura (garantiza legibilidad)
+    fig_w = max(18, n_cols * 1.0)
+    fig_h = max(9, n_rows * 1.0)
+
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h), facecolor="white")
     ax.axis("off")
-
-    # ================= TABLA VISUAL (SOLO ESTILO) =================
-
-    table = ax.table(
-        cellText=df_formatted.values,
-        colLabels=df_formatted.columns,
-        cellLoc="left",
-        loc="center"
-    )
-
-    # --- Ajustes generales ---
-    table.auto_set_font_size(False)
-
-    # Fuente base más grande (ajustable)
-    BASE_FONT_SIZE = 14 if n_rows > 10 or fig_w > 20 else 12
-    table.set_fontsize(BASE_FONT_SIZE)
-
-    # Escalar tabla para evitar amontonamiento
-    table.scale(1.2, 1.4)
-
-    # --- Estilo de celdas ---
-    for (row, col), cell in table.get_celld().items():
-        # Bordes negros en TODAS las celdas
-        cell.set_edgecolor("black")
-        cell.set_linewidth(1)
-        cell.visible_edges = "closed"
-
-        # Altura de fila más cómoda
-        cell.set_height(0.08)
-
-        # Texto
-        text = cell.get_text()
-        text.set_wrap(True)
-        text.set_multialignment("left")
-
-        # Encabezados más destacados
-        if row == 0:
-            text.set_fontweight("bold")
-            text.set_fontsize(BASE_FONT_SIZE + 1)
-
-    # ==============================================================
-
-
 
     # === PREVENCIÓN DE TABLA VACÍA ===
     if df_formatted.empty:
         fig, ax = plt.subplots(figsize=(10, 2))
         ax.axis("off")
         ax.text(
-            0.5, 0.5,
+            0.5,
+            0.5,
             "No hay datos para mostrar en la tabla",
-            ha="center", va="center",
-            fontsize=18, fontweight="bold"
+            ha="center",
+            va="center",
+            fontsize=18,
+            fontweight="bold",
         )
         return fig, ax
 
-
+    # Crear la tabla principal
     tabla = ax.table(
         cellText=df_formatted.values.tolist(),
         colLabels=df_formatted.columns.tolist(),
         cellLoc="center",
         loc="center",
-        colWidths=[0.28] * n_cols
+        colWidths=[0.28] * n_cols,
     )
     tabla.auto_set_font_size(False)
     tabla.set_fontsize(28)
-    tabla.scale(2.2, 4.2)
+    # Escala ajustada: buena altura sin aplanar
+    tabla.scale(1.6, 3.2)
 
+    # Ajustar automáticamente el ancho de las columnas según contenido
     for col_idx in range(n_cols):
         tabla.auto_set_column_width(col=col_idx)
 
@@ -1360,23 +1372,30 @@ def graficar_tabla(
             # Filas de datos
             valor = cell.get_text().get_text()
             try:
-                float(valor.replace(',', ''))
+                float(valor.replace(",", ""))
                 cell.set_text_props(color="#212121", fontsize=32, weight="bold")
             except Exception:
                 cell.set_text_props(color="#2c3e50", fontsize=28, weight="normal")
 
             cell.set_facecolor(data_bg)
 
-        cell.set_edgecolor("#FFFFFF")
-        cell.set_linewidth(1.5)
-        cell.PAD = 0.42
+        # Borde interno gris oscuro
+        cell.set_edgecolor("#292929")
+        cell.set_linewidth(1.2)
+        cell.PAD = 0.3
 
-    # Título (recuerda que en plot_from_params ya lo estamos vaciando)
+    # Título (en tu flujo general se suele vaciar desde plot_from_params,
+    # pero aquí mantenemos la lógica por si se usa directo)
     if titulo:
-        ax.set_title(titulo, fontsize=38, fontweight="bold", pad=60, color="#000000")
+        ax.set_title(titulo, fontsize=38, fontweight="bold", pad=60, color="#141414")
 
-    fig.tight_layout(pad=6.5)
+    # Ajustar layout para minimizar espacios en blanco sin deformar la tabla
+    fig.tight_layout(pad=0.5)
+
     return fig, ax
+
+
+
 
 # ===========================
 # Router desde params
@@ -1800,6 +1819,9 @@ def plot_from_params(df: pd.DataFrame, params: Dict[str, Any], *, show: bool = F
             common_kwargs["y"] = y[0] if y else None
         if sort is not None:
             common_kwargs["sort"] = sort
+        colors_by_category = p.get("colors_by_category")
+        if colors_by_category is not None:
+            common_kwargs["colors_by_category"] = colors_by_category
 
     # -------------------------------------------------
     # 10. Evitar doble filtrado dentro de las funciones

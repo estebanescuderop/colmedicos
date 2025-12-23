@@ -1,8 +1,8 @@
 
-from Colmedicos.ia import ask_gpt5, portada_gpt5
+from Colmedicos.ia import ask_gpt5
 from Colmedicos.io_utils import generar_output, aplicar_data_por_tipo_desde_output, aplicar_ia_por_tipo, aplicar_plot_por_tipo_desde_output, exportar_output_a_html, mostrar_html, limpiar_output_dataframe
 from Colmedicos.registry import register
-from Colmedicos.io_utils_remaster import process_ia_blocks, process_data_blocks, process_plot_blocks, _render_vars_text, exportar_output_a_html, _fig_to_data_uri, _format_result_plain, columnas_a_texto,aplicar_multiples_columnas_gpt5, limpieza_final,  unpivot_df, dividir_columna_en_dos, procesar_codigos_cie10, unir_dataframes, expand_json_column
+from Colmedicos.io_utils_remaster import process_ia_blocks, process_data_blocks, process_plot_blocks, _render_vars_text, exportar_output_a_html, _fig_to_data_uri, _format_result_plain, columnas_a_texto,aplicar_multiples_columnas_gpt5, limpieza_final,  unpivot_df, dividir_columna_en_dos, procesar_codigos_cie10, unir_dataframes, expand_json_column, procesar_apendices, process_titulo_blocks
 import pandas as pd
 
 # Colmedicos/api.py
@@ -127,9 +127,9 @@ def informe_final(
     # data: ||...||
     _re_data = re.compile(r"\|\|.*?\|\|", re.S)
     # ia: +IA_  (al inicio de línea o en medio)
-    _re_ia   = re.compile(r"\+\s*(.*?)\s*\+", re.I)
+    _re_ia = re.compile(r"\+\s*(.*?)\s*\+", re.I)
     # plots: #GRAFICA# o #GRAFICO# o tus tags internos
-    _re_plot = re.compile(r"#\s*(.*?)\s*#", re.I)
+    _re_plot = re.compile(r"#([^#]+)#", re.I)
 
     try:
         # 1) Render de variables
@@ -142,8 +142,11 @@ def informe_final(
 
         # Detectar tokens de cada módulo antes de llamar nada costoso
         hay_data = bool(_re_data.search(text))
+        print(hay_data)
         hay_ia   = bool(_re_ia.search(text))
+        print(hay_ia)
         hay_plot = bool(_re_plot.search(text))
+        print(hay_plot)
 
         # 2) Data blocks (solo si hay ||...|| en el texto)
         if hay_data:
@@ -159,15 +162,16 @@ def informe_final(
         if generar_portada:
             t35 = time.perf_counter()
             try:
-                portada = portada_gpt5(text_for_next)
-                text_con_portada = portada 
+                contenido = procesar_apendices(text_for_next)
+                contenido, tabla = process_titulo_blocks(contenido)
+                text_filtrado = tabla + "\n\n" + contenido 
                 #+ "\n\n" + text_for_next
                 logs.append("Generación de portada y TOC: OK")
-                meta_detalle["t_portada"] = round(time.perf_counter() - t35, 4)
-                text_for_next = text_con_portada
+                meta_detalle["t_apendices"] = round(time.perf_counter() - t35, 4)
+                text_for_next = text_filtrado
             except Exception as e_port:
                 logs.append(f"Generación de portada y TOC: ERROR → {e_port}")
-                meta_detalle["t_portada"] = round(time.perf_counter() - t35, 4)
+                meta_detalle["t_apendices"] = round(time.perf_counter() - t35, 4)
 
 
         # 3) IA blocks (solo si hay +IA_)

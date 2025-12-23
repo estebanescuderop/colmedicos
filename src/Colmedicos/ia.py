@@ -12,6 +12,8 @@ from Colmedicos.registry import register
 from Colmedicos.config import OPENAI_API_KEY
 
 API_KEY = "API"
+API_KEY2 = "API"
+API_KEY3 = "API"
 instruccion = "Eres un médico especialista en Salud Ocupacional en Colombia. Especialista en hablar sobre datos estádisticos y relacionarlos con información de salud ocupacional. Tu trabajo es generar análisis cuantitativos basados en instrucciones médicas en español, interpretando las cifras y proporcionando recomendaciones claras y fundamentadas"
 rol = """Generas informes claros, técnicos y coherentes para empresas de todos los sectores económicos.
 Tu informe no se limita a describir datos: interpreta, contextualiza, correlaciona y recomienda, siempre con enfoque preventivo.
@@ -66,12 +68,13 @@ Con base a la siguiente INSTRUCCIÓN: {INSTRUCCION}
  devuelve estrictamente la Salida JSON sin instrucciones o texto adicional.
 """
 client = openai.OpenAI(api_key=API_KEY)
-  
+client1 = openai.OpenAI(api_key=API_KEY2)  
+client3 = openai.OpenAI(api_key=API_KEY3)  
 @register("ask_gpt5")
 def ask_gpt5(pregunta):
     """Envía un prompt y devuelve la respuesta de GPT-5."""
     instruc = json.dumps(pregunta, ensure_ascii=False)
-    respuesta = client.chat.completions.create(
+    respuesta = client1.chat.completions.create(
         model="gpt-4.1",  # 👈 Aquí usas GPT-5 directamente
         messages=[
             {"role": "system", "content": rol},
@@ -174,7 +177,7 @@ Si no se indica agregación, por defecto "sum" si y es numérica; de lo contrari
 
 E. Filtros (conditions_all, conditions_any)
 
-Operadores: >, <, >=, <=, ==, !=, in, not in.
+Operadores: >, <, >=, <=, ==, !=, in, not in, contains, startswith, endswith, like, icontains (insensible a tildes)
 
 conditions_all: lista de condiciones AND.
 
@@ -508,8 +511,7 @@ def graficos_gpt5(df, pregunta: Union[str, List[Dict[str, Any]]]) -> Union[Dict[
     payload_cols = json.dumps(columnas, ensure_ascii=False)
     instruccion_tipo = json.dumps(pregunta, ensure_ascii=False)
     subprompt = _MSJ_GRAFO_V2.replace("{COLUMNAS_JSON}", payload_cols).replace("{INSTRUCCION}", str(instruccion_tipo))
-    time.sleep(1)
-    respuesta = client.chat.completions.create(
+    respuesta = client3.chat.completions.create(
     model="gpt-5",  # 👈 Aquí usas GPT-5 directamente
     messages=[
             {"role": "system", "content": "Eres un experto en análisis de datos y tu trabajo es interpretar textos y extraer las instrucciones precisas de acuerdo a las columnas de un dataframe"},
@@ -602,7 +604,7 @@ Nunca generes "column": null.
      - `"conditions_any"`: lista de **bloques** combinados con OR. Cada ítem puede ser:
        - una condición única `["col","op","valor"]`, o
        - un bloque AND `[[...],[...]]`.
-   - Operadores soportados: `">","<","==","!=","?>=","<=","in","not in"`.
+   - Operadores soportados: `">","<","==","!=","?>=","<=","in","not in","contains", "startswith", "endswith", "regex", "like"`
      - Para `"in"/"not in"` el valor debe ser **lista**.
    - Rangos del tipo “18.5 ≤ IMC ≤ 24.9” se expresan como **dos** condiciones en el mismo bloque.
 
@@ -725,7 +727,7 @@ def operaciones_gpt5(df, pregunta):
     payload_cols = json.dumps(columnas, ensure_ascii=False)
     instruccion = json.dumps(pregunta, ensure_ascii=False)
     subprompt = (MSJ_OPS.replace("{COLUMNAS_JSON}", payload_cols).replace("{INSTRUCCION}", str(instruccion)))
-    respuesta = client.chat.completions.create(
+    respuesta = client1.chat.completions.create(
         model="gpt-5",  # 👈 Aquí usas GPT-5 directamente
         messages=[
             {"role": "system", "content": "Eres un analista que extrae parámetros para realizar calculos a partir de una instrucción en lenguaje natural y una lista de columnas disponibles de un DataFrame de pandas."},
@@ -894,217 +896,117 @@ def columns_batch_gpt5(payload):
     params = json.loads(texto_respuesta)
     return params
 
-AG_P = """
-Eres un agente experto en estructuración de documentos técnicos de salud ocupacional. 
-Debes transformar UNA sola cadena de texto en un documento final depurado cumpliendo un flujo 
-determinístico obligatorio. No puedes inventar, asumir, resumir, interpretar libremente ni 
-agregar contenido que no exista.
 
-TU MISIÓN ES CUMPLIR EXACTAMENTE ESTOS CINCO OBJETIVOS:
 
-1. Generar UNA sola portada.
-2. Construir UNA sola tabla de contenido, basada estrictamente en los títulos detectados.
-3. Detectar y ELIMINAR por completo los apéndices que no contengan datos válidos.
-4. Numerar y reenumerar títulos y subtítulos del contenido final.
-5. Garantizar que la salida respete EXACTAMENTE la estructura indicada por el usuario.
+AG_TITULOS = """
+Eres un agente experto en estructuración de documentos técnicos en salud ocupacional.
 
-RESTRICCIONES ABSOLUTAS:
-- No generes explicaciones.
-- No agregues notas, avisos, comentarios ni textos fuera del formato solicitado.
-- No inventes contenido.
-- No alteres el texto original salvo para numerar títulos y eliminar apéndices.
-- No devuelvas JSON ni código.
-- La salida debe ser SOLO texto plano.
+Recibirás como entrada únicamente un arreglo JSON generado por la función extraer_titulos(), 
+con esta forma:
+
+[
+  {
+    "idx": N,
+    "titulo": "TEXTO EXACTO DEL TÍTULO",
+    "span": [inicio, fin]
+  },
+  ...
+]
+
+Tu misión es CLASIFICAR y NUMERAR cada título y devolver un JSON estructurado
+sin agregar explicaciones ni texto adicional.
 
 ================================================================
-1. ORDEN OBLIGATORIO DE SALIDA
+1. CLASIFICACIÓN OBLIGATORIA DE NIVELES
 ================================================================
 
-Debes devolver SIEMPRE, en ESTE ORDEN EXACTO:
-
-1. PORTADA  
-2. TABLA DE CONTENIDO (incluyendo marca explícita de títulos eliminados por apéndices)  
-3. DOCUMENTO FINAL DEPURADO, que debe contener:  
-   3.1. Sección textual obligatoria: “APÉNDICES ELIMINADOS”  
-        seguida de la lista de títulos de apéndices eliminados.  
-   3.2. Numeración final completa y coherente de todos los títulos/subtítulos válidos.
-
-NO debes escribir nada antes, entre o después.
-
-================================================================
-2. PORTADA — FORMATO FIJO
-================================================================
-
-La portada DEBE seguir el siguiente formato EXACTO:
-
-DIAGNOSTICO DE CONDICIONES DE SALUD POBLACIÓN TRABAJADORA
-EVALUACIONES MEDICAS OCUPACIONALES PERIODICAS PROGRAMADAS
-
-EMPRESA:
-[Nombre de la empresa]
-
-RESULTADOS DE EVALUACIONES:
-Desde el dd/mm/aaaa hasta dd/mm/aaaa
-
-Laboratorio Clínico Colmedicos I.P.S S.A.S
-Medellín – Bogotá D.C. - Cundinamarca – Rionegro – Cali – Palmira – Red nacional.
-www.colmedicos.com
-
-Reglas:
-- Detecta empresa y fechas únicamente si aparecen claramente en el texto.
-- Si no aparecen, deja los marcadores entre [ ].
-- No modifiques este formato.
-
-================================================================
-3. DETECCIÓN Y CLASIFICACIÓN DE TÍTULOS (Pipeline obligatorio)
-================================================================
-
-Antes de generar la tabla de contenido o numerar el documento, debes ejecutar ESTE PROCESO 
-DE CUATRO FASES. GPT-4.1 no puede desviarse de este orden.
-
--------------------------
-FASE 1 — EXTRACCIÓN
--------------------------
-1. Extrae TODAS las ocurrencias literales de:  
-   <span class="titulo">...</span>
-2. Cada ocurrencia es un título independiente.
-3. Usa su texto EXACTO; no lo modifiques.
-
--------------------------
-FASE 2 — CLASIFICACIÓN DE NIVEL
--------------------------
-
-Usa SOLO estas reglas:
+Debes clasificar cada elemento como NIVEL 1 o NIVEL 2 usando EXACTAMENTE estas reglas:
 
 NIVEL 1
-- Texto en MAYÚSCULAS COMPLETAS, o
-- Es el primer título del documento.
+- El texto del título está en MAYÚSCULAS COMPLETAS, o
+- Es el primer título del arreglo.
 
 NIVEL 2
-- Texto en minúsculas o “Título en Mayúscula Inicial”, o
-- Sigue inmediatamente a un nivel 1.
-
-NIVEL 3
-- Sigue a un nivel 2, y
-- Es más específico en contenido.
+- El texto está en minúsculas, mayúscula inicial o mezcla,
+  y aparece después de un NIVEL 1.
 
 Reglas rígidas:
-- Si hay ambigüedad → asigna el MISMO nivel que el título anterior.
-- Dos títulos consecutivos en mayúsculas → ambos nivel 1.
-- No mezclar niveles arbitrariamente.
+- Un título completamente en mayúsculas → NIVEL 1.
+- Un título que NO está completamente en mayúsculas → NIVEL 2.
+- Los subtítulos pertenecen SIEMPRE al último título NIVEL 1 detectado.
+- No existen niveles 3 ni superiores.
 
--------------------------
-FASE 3 — NUMERACIÓN
--------------------------
-Usa exclusivamente este patrón:
+================================================================
+2. NUMERACIÓN OBLIGATORIA
+================================================================
 
-- Nivel 1 →       1, 2, 3 …
-- Nivel 2 →       1.1, 1.2, 1.3 …
-- Nivel 3 →       1.1.1, 1.1.2 …
+Asigna numeración estricta siguiendo este patrón:
+
+NIVEL 1 → 1, 2, 3, 4…
+NIVEL 2 → 1.1, 1.2, 1.3… asociados al último NIVEL 1.
 
 Reglas:
-- Los contadores reinician cuando corresponde.
 - La numeración nunca retrocede.
-- Debes asegurar continuidad absoluta.
-
--------------------------
-FASE 4 — TABLA DE CONTENIDO
--------------------------
-Construye la tabla con:
-- numeración asignada,
-- título EXACTO,
-- en el orden detectado.
-
-Los apéndices que sean eliminados deben aparecer marcados en esta tabla como:
-[ELIMINADO]
+- Cada NIVEL 1 reinicia el contador de subtítulos.
+- No inventes numeración ni títulos.
+- Conserva el texto EXACTO del título.
 
 ================================================================
-4. APÉNDICES — DETECCIÓN Y ELIMINACIÓN FORZADA
+3. FORMATO FINAL DE SALIDA
 ================================================================
 
-Un apéndice es cualquier sección que:
-- Inicia con <span class="titulo">...</span>, y
-- Contiene al menos un bloque +...+.
+Debes devolver EXCLUSIVAMENTE un arreglo JSON donde cada elemento tiene esta forma:
 
--------------------------
-PROCESO OBLIGATORIO DE EVALUACIÓN
--------------------------
+{
+  "idx": N,
+  "titulo": "NUMERACIÓN + ESPACIO + TÍTULO EXACTO",
+  "span": [inicio, fin]
+}
 
-FASE 1 — EXTRAER BLOQUES
-- Extrae TODO el contenido dentro de cada +...+ del apéndice.
+Ejemplo de salida válida:
 
-FASE 2 — VALIDAR DATOS
-El apéndice SE ELIMINA si ocurre UNA sola de estas condiciones:
+[
+  {
+    "idx": 1,
+    "titulo": "1 INTRODUCCIÓN",
+    "span": [123, 150]
+  },
+  {
+    "idx": 2,
+    "titulo": "1.1 antecedentes",
+    "span": [151, 178]
+  }
+]
 
-- El contenido entre +...+ está vacío.
-- No contiene números válidos.
-- Todos los números encontrados son 0.
-- Contiene errores, avisos o textos de falla.
-- Contiene información incoherente o no relacionada con datos.
-- No se puede determinar con certeza que existen datos válidos.
-
-*Regla máxima:*  
-SI HAY DUDA → ELIMINAR.
-
-FASE 3 — ELIMINACIÓN TOTAL
-Debe eliminarse todo el bloque desde el <span class="titulo">...</span> 
-hasta el siguiente título detectable.
-
-FASE 4 — REGISTRO
-Debes registrar el título del apéndice eliminado y reportarlo en:
-“APÉNDICES ELIMINADOS”
+Reglas estrictas:
+- No agregues campos adicionales.
+- No agregues explicaciones.
+- No cambies los valores de span.
+- No modifiques el texto del título original.
+- No incluyas texto fuera del JSON.
 
 ================================================================
-5. DOCUMENTO FINAL NUMERADO
+4. INSTRUCCIÓN FINAL
 ================================================================
 
-Reglas para la salida del documento final:
+Con base en el arreglo {titulos}, devuelve ÚNICAMENTE el JSON estructurado
+con la numeración incorporada.
 
-1. Sustituye cada <span class="titulo">TEXTO</span> por:
-   [numeración asignada] TEXTO
+No devuelvas nada más.
+FIN.
 
-2. NO modifiques el texto contenido fuera de títulos.
-
-3. Los apéndices eliminados no deben aparecer en el contenido final.
-
-4. La numeración del documento debe coincidir EXACTAMENTE con la tabla de contenido.
-
-================================================================
-6. ESTRUCTURA FINAL DE SALIDA (OBLIGATORIA)
-================================================================
-
-La salida final DEBE ser:
-
-1. PORTADA  
-
-2. TABLA DE CONTENIDO  
-   (incluyendo marcas [ELIMINADO] cuando corresponda)
-
-3. DOCUMENTO FINAL  
-   3.1 CONTENIDO NUMERADO FINAL  
-       (texto depurado con títulos numerados y sin apéndices eliminados)
-   3.2 APÉNDICES ELIMINADOS:  
-       - lista exacta de títulos eliminados  
-
-
-NO generes nada más. NO agregues explicaciones.
-
-FIN.  
-A partir del {texto} de entrada, produce únicamente la salida con esta estructura exacta.
 """
 
-
 rol1 = """Eres un agente experto en documentación de salud ocupacional.
-Tu tarea es, a partir de una sola cadena de texto que recibirás como entrada, construir una portada y una tabla de contenido en texto plano."""
-
+Tu tarea es, a partir de una sola cadena de texto que recibirás como entrada, construir una salida JSON con unos titulos numerados"""
   
 @register("portada_gpt5")
-def portada_gpt5(texto):
+def titulos_gpt5(texto):
     """Envía un prompt y devuelve la respuesta de GPT-5."""
-    subprompt = AG_P.replace("{texto}", texto)
-    time.sleep(3)
-    respuesta = client.chat.completions.create(
-        model="gpt-4.1-mini",  # 👈 Aquí usas GPT-5 directamente
+    texto = json.dumps(texto, ensure_ascii=False)
+    subprompt = AG_TITULOS.replace("{titulos}", texto)
+    respuesta = client1.chat.completions.create(
+        model="gpt-4.1",  # 👈 Aquí usas GPT-5 directamente
         messages=[
             {"role": "system", "content": rol1},
             {"role": "user", "content": subprompt}
@@ -1113,3 +1015,149 @@ def portada_gpt5(texto):
 
     texto_respuesta = respuesta.choices[0].message.content
     return texto_respuesta
+
+AG_APENDICES = """Eres un agente experto en estructuración y depuración de documentos técnicos en salud ocupacional.
+Tu única misión es analizar un texto completo que contiene uno o varios bloques en formato:
+
+<div class="Apendice N">
+    ...
+</div>
+
+Cada bloque representa un APÉNDICE independiente.
+
+================================================================
+1. OBJETIVO ÚNICO
+================================================================
+Debes devolver exclusivamente un JSON con dos listas:
+
+{
+  "conservar": [indices],
+  "borrar": [indices]
+}
+
+No generes texto adicional, explicación ni comentarios.
+
+================================================================
+2. DEFINICIÓN CRÍTICA
+================================================================
+
+TIPO A → Apéndices SIN bloques IA (+...+)  
+TIPO B → Apéndices CON bloques IA (+...+)
+
+Ambos deben tratarse de forma diferente.
+
+================================================================
+3. REGLAS PARA APÉNDICES TIPO A (SIN +...+)
+================================================================
+
+Un apéndice **SIN ningún bloque IA (+...+) SIEMPRE se debe CONSERVAR**.
+
+Se consideran válidos:
+- textos descriptivos,
+- explicaciones,
+- interpretaciones,
+- narrativa fija,
+- introducciones,
+- conclusiones,
+- texto técnico sin métricas,
+- cualquier contenido sin análisis IA.
+
+**Nunca** se deben borrar apéndices sin IA.
+
+================================================================
+4. REGLAS PARA APÉNDICES TIPO B (CON +...+)
+================================================================
+
+Estos apéndices contienen análisis IA o tablas procesadas.  
+Deben conservarse SOLO si realmente incluyen datos válidos.
+
+================================================================
+4.1 UN APÉNDICE TIPO B SE CONSERVA SI:
+================================================================
+
+- Contiene al menos un número distinto de 0 dentro de +...+  
+    Ejemplo: 1, 2, 0.3, 15%, etc.
+
+O si:
+- Contiene porcentajes, proporciones o métricas.
+- Contiene conteos o cálculos válidos.
+- Se presentan distribuciones que no son error.
+- Se muestra una tabla o resultado con valores diferentes a cero.
+
+================================================================
+4.2 UN APÉNDICE TIPO B SE BORRA SOLO SI CUMPLE ALGUNA:
+================================================================
+
+- El contenido entre +...+ está vacío.
+- No se encuentran números dentro de +...+.
+- TODOS los números dentro de +...+ son 0.
+    (Ejemplos claros de eliminación:)
+      - Todas las filas en 0
+      - Tablas tipo:
+        Resultado  |  conteo  
+        ------------|---------
+        Normal      |    0
+        Alterado    |    0
+
+- El contenido entre +...+ contiene errores:
+    “no se pudo traer data”
+    “error”
+    “fallo”
+    “no disponible”
+    “sin datos”
+
+- El contenido entre +...+ contiene avisos, placeholders o texto incoherente.
+- El contenido entre +...+ es puramente descriptivo sin datos numéricos.
+- No puede determinarse con certeza que existen datos válidos.
+- De manera explícita se informa que NO hay datos numéricos.
+
+================================================================
+5. REGLA MÁXIMA
+================================================================
+
+SI UN APÉNDICE NO TIENE BLOQUES +...+ → **CONSERVAR**  
+SI TIENE +...+ PERO HAY DUDA SOBRE LOS DATOS → **BORRAR**
+
+================================================================
+6. SALIDA OBLIGATORIA
+================================================================
+
+Devuelve exclusivamente este JSON:
+
+{
+  "conservar": [...],
+  "borrar": [...]
+}
+
+- "conservar" → índices N de apéndices que deben conservarse.
+- "borrar" → índices N de apéndices que deben eliminarse.
+
+No generes texto adicional ni comentarios.
+No reordenes los índices.
+No modifiques el texto.
+No inventes datos.
+
+FIN. SOLO JSON.
+Instrucción final: con base al {texto} devuelve solo JSON de salida válido.
+"""
+
+rol2 = """Eres un agente experto en documentación de salud ocupacional.
+Tu tarea es, a partir de una sola cadena de texto que recibirás como entrada, construir JSON de salida válido"""
+
+
+@register("portada_gpt5")
+def apendices_gpt5(texto):
+    """Envía un prompt y devuelve la respuesta de GPT-5."""
+    subprompt = AG_APENDICES.replace("{texto}", texto)
+    respuesta = client1.chat.completions.create(
+        model="gpt-4.1",  # 👈 Aquí usas GPT-5 directamente
+        messages=[
+            {"role": "system", "content": rol2},
+            {"role": "user", "content": subprompt}
+        ]
+    )
+
+    texto_respuesta = respuesta.choices[0].message.content
+    return texto_respuesta
+
+

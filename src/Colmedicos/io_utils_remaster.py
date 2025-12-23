@@ -13,7 +13,7 @@ import numpy as np
 
 # --- Project-local ---
 from Colmedicos.registry import register
-from Colmedicos.ia import operaciones_gpt5, graficos_gpt5, ask_gpt5,columns_batch_gpt5
+from Colmedicos.ia import operaciones_gpt5, graficos_gpt5, ask_gpt5,columns_batch_gpt5, apendices_gpt5, titulos_gpt5
 from Colmedicos.math_ops import ejecutar_operaciones_condicionales
 from Colmedicos.charts import plot_from_params
 
@@ -188,155 +188,155 @@ def aplicar_ia_en_texto(texto: str, resultados_ia, formato: str = "html") -> str
     return out
 
 
-# @register("process_ia_blocks")
-# def process_ia_blocks(
-#     texto: str,
-#     *,
-#     batch_size: int = 40,
-#     max_workers: int = 1,
-#     debug: bool = False,
-# ) -> str:
-#     """
-#     Versión FINAL optimizada de bloques IA (+ ... +)
-
-#     - Batching de instrucciones (optimiza costo)
-#     - Paralelización de llamadas IA (optimiza tiempo)
-#     - Orden y spans deterministas
-#     - Fallback seguro ante errores/cuota
-#     """
-
-#     import concurrent.futures
-#     import json
-
-#     # -------------------------------------------------
-#     # 1️⃣ Extraer bloques
-#     # -------------------------------------------------
-#     extract = extraer_ia_blocks(texto)
-#     if not extract:
-#         return texto
-
-#     def _chunk_list(lst, size):
-#         for i in range(0, len(lst), size):
-#             yield lst[i:i + size]
-
-#     # -------------------------------------------------
-#     # 2️⃣ Crear batches
-#     # -------------------------------------------------
-#     batches = list(_chunk_list(extract, batch_size))
-
-#     # -------------------------------------------------
-#     # 3️⃣ Job IA (batch)
-#     # -------------------------------------------------
-#     def _procesar_batch(batch):
-#         try:
-#             out = ask_gpt5(batch)
-
-#             if isinstance(out, str):
-#                 try:
-#                     out = _json_loads_loose(out)
-#                 except Exception as e:
-#                     if debug:
-#                         print("Error parseando IA JSON:", e)
-#                     return []
-
-#         except Exception as e:
-#             if debug:
-#                 print("Error IA batch:", e)
-#             return []
-
-#         if not isinstance(out, list):
-#             return []
-
-#         return out  # [{idx, params, span}, ...]
-
-#     # -------------------------------------------------
-#     # 4️⃣ Ejecutar IA en paralelo
-#     # -------------------------------------------------
-#     resultados_por_idx = {}
-
-#     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-#         futures = [executor.submit(_procesar_batch, batch) for batch in batches]
-
-#         for future in concurrent.futures.as_completed(futures):
-#             try:
-#                 out_batch = future.result()
-#                 for item in out_batch:
-#                     if isinstance(item, dict) and "params" in item:
-#                         resultados_por_idx[item["idx"]] = item
-#             except Exception as e:
-#                 if debug:
-#                     print("Error future IA:", e)
-
-#     # -------------------------------------------------
-#     # 5️⃣ Reemplazar en texto (SECUENCIAL)
-#     # -------------------------------------------------
-#     resultados_ia = []
-
-#     for bloque in sorted(extract, key=lambda b: b["idx"]):
-#         idx = bloque["idx"]
-#         span = bloque["span"]
-
-#         item = resultados_por_idx.get(idx)
-#         if not item:
-#             continue
-
-#         params = item.get("params")
-
-#         try:
-#             resultados_ia.append((idx, bloque["prompt"], span, params))
-#         except Exception as e:
-#             resultados_ia.append((idx, bloque["prompt"], span, f"[error:{str(e)}]"))
-
-#     texto_reemplazado = aplicar_ia_en_texto(
-#         texto,
-#         resultados_ia,
-#         formato="html"
-#     )
-
-#     return texto_reemplazado
-
-
 @register("process_ia_blocks")
 def process_ia_blocks(
-    texto: str # "raise" | "return_input"
+    texto: str,
+    *,
+    batch_size: int = 10,
+    max_workers: int = 4,
+    debug: bool = False,
 ) -> str:
+    """
+    Versión FINAL optimizada de bloques IA (+ ... +)
 
-   # 1) Ejecutar operaciones_gpt5 y asegurar conversión a JSON con spans
+    - Batching de instrucciones (optimiza costo)
+    - Paralelización de llamadas IA (optimiza tiempo)
+    - Orden y spans deterministas
+    - Fallback seguro ante errores/cuota
+    """
+
+    import concurrent.futures
+    import json
+
+    # -------------------------------------------------
+    # 1️⃣ Extraer bloques
+    # -------------------------------------------------
     extract = extraer_ia_blocks(texto)
-    out = ask_gpt5(extract)
- 
-    if isinstance(out, str):
+    if not extract:
+        return texto
+
+    def _chunk_list(lst, size):
+        for i in range(0, len(lst), size):
+            yield lst[i:i + size]
+
+    # -------------------------------------------------
+    # 2️⃣ Crear batches
+    # -------------------------------------------------
+    batches = list(_chunk_list(extract, batch_size))
+
+    # -------------------------------------------------
+    # 3️⃣ Job IA (batch)
+    # -------------------------------------------------
+    def _procesar_batch(batch):
         try:
-            out = json.loads(out)
-        except json.JSONDecodeError as e:
-            raise ValueError(f"JSON inválido: {e}") from e
+            out = ask_gpt5(batch)
 
-    if not isinstance(out, list):
-        raise TypeError("El resultado de operaciones_gpt5 debe ser una lista de objetos JSON.")
+            if isinstance(out, str):
+                try:
+                    out = _json_loads_loose(out)
+                except Exception as e:
+                    if debug:
+                        print("Error parseando IA JSON:", e)
+                    return []
 
-    resultados_ops: List[
-        Tuple[int, Dict[str, Any], Union[Tuple[int, int], None], str]
-    ] = []
+        except Exception as e:
+            if debug:
+                print("Error IA batch:", e)
+            return []
 
+        if not isinstance(out, list):
+            return []
 
-    # 2) Ejecutar cada operación y formatear resultado
-    for item in out:
-        if isinstance(item, dict) and "params" in item:
-            idx = item.get("idx")
-            params = item.get("params")
-            span = item.get("span")
+        return out  # [{idx, params, span}, ...]
 
+    # -------------------------------------------------
+    # 4️⃣ Ejecutar IA en paralelo
+    # -------------------------------------------------
+    resultados_por_idx = {}
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(_procesar_batch, batch) for batch in batches]
+
+        for future in concurrent.futures.as_completed(futures):
             try:
-                resultado_fmt = params
-                resultados_ops.append((idx, params, span, resultado_fmt))
+                out_batch = future.result()
+                for item in out_batch:
+                    if isinstance(item, dict) and "params" in item:
+                        resultados_por_idx[item["idx"]] = item
             except Exception as e:
-                # Mantener trazabilidad sin romper el tipo (resultado como string legible)
-                error_txt = f"[error:{str(e)}]"
-                resultados_ops.append((idx, params, span, error_txt))
-    
-    # 3) Reemplazar spans por resultados (elige "html" o "texto simple")
-    texto_reemplazado = aplicar_ia_en_texto(texto, resultados_ops, formato="html")
+                if debug:
+                    print("Error future IA:", e)
+
+    # -------------------------------------------------
+    # 5️⃣ Reemplazar en texto (SECUENCIAL)
+    # -------------------------------------------------
+    resultados_ia = []
+
+    for bloque in sorted(extract, key=lambda b: b["idx"]):
+        idx = bloque["idx"]
+        span = bloque["span"]
+
+        item = resultados_por_idx.get(idx)
+        if not item:
+            continue
+
+        params = item.get("params")
+
+        try:
+            resultados_ia.append((idx, bloque["prompt"], span, params))
+        except Exception as e:
+            resultados_ia.append((idx, bloque["prompt"], span, f"[error:{str(e)}]"))
+
+    texto_reemplazado = aplicar_ia_en_texto(
+        texto,
+        resultados_ia,
+        formato="html"
+    )
+
     return texto_reemplazado
+
+
+# @register("process_ia_blocks")
+# def process_ia_blocks(
+#     texto: str # "raise" | "return_input"
+# ) -> str:
+
+#    # 1) Ejecutar operaciones_gpt5 y asegurar conversión a JSON con spans
+#     extract = extraer_ia_blocks(texto)
+#     out = ask_gpt5(extract)
+ 
+#     if isinstance(out, str):
+#         try:
+#             out = json.loads(out)
+#         except json.JSONDecodeError as e:
+#             raise ValueError(f"JSON inválido: {e}") from e
+
+#     if not isinstance(out, list):
+#         raise TypeError("El resultado de operaciones_gpt5 debe ser una lista de objetos JSON.")
+
+#     resultados_ops: List[
+#         Tuple[int, Dict[str, Any], Union[Tuple[int, int], None], str]
+#     ] = []
+
+
+#     # 2) Ejecutar cada operación y formatear resultado
+#     for item in out:
+#         if isinstance(item, dict) and "params" in item:
+#             idx = item.get("idx")
+#             params = item.get("params")
+#             span = item.get("span")
+
+#             try:
+#                 resultado_fmt = params
+#                 resultados_ops.append((idx, params, span, resultado_fmt))
+#             except Exception as e:
+#                 # Mantener trazabilidad sin romper el tipo (resultado como string legible)
+#                 error_txt = f"[error:{str(e)}]"
+#                 resultados_ops.append((idx, params, span, error_txt))
+    
+#     # 3) Reemplazar spans por resultados (elige "html" o "texto simple")
+#     texto_reemplazado = aplicar_ia_en_texto(texto, resultados_ops, formato="html")
+#     return texto_reemplazado
 
 # ----------------------------
 # 5) Función que calcula DATOS.
@@ -464,7 +464,7 @@ def process_data_blocks(
     texto: str,
     *,
     batch_size: int = 7,
-    max_workers: int = 2,
+    max_workers: int = 4,
     debug: bool = False,
 ):
     """
@@ -728,155 +728,155 @@ def _json_loads_loose(s: str) -> Any:
         raise
 
 
-# def process_plot_blocks(
-#     df: pd.DataFrame,
-#     texto: str,
-#     *,
-#     batch_size: int = 8,
-#     max_workers: int = 2,
-#     debug: bool = False,
-# ):
-#     """
-#     Versión FINAL paralelizada del orquestador de GRÁFICAS:
+def process_plot_blocks(
+    df: pd.DataFrame,
+    texto: str,
+    *,
+    batch_size: int = 6,
+    max_workers: int = 4,
+    debug: bool = False,
+):
+    """
+    Versión FINAL paralelizada del orquestador de GRÁFICAS:
 
-#     - Batching de bloques #...# (optimiza costo IA)
-#     - Paralelización de graficos_gpt5 (optimiza tiempo)
-#     - Render de gráficas y reemplazo determinista
-#     """
+    - Batching de bloques #...# (optimiza costo IA)
+    - Paralelización de graficos_gpt5 (optimiza tiempo)
+    - Render de gráficas y reemplazo determinista
+    """
 
-#     import concurrent.futures
-#     import json
+    import concurrent.futures
+    import json
 
-#     # -------------------------------------------------
-#     # 1️⃣ Extraer bloques
-#     # -------------------------------------------------
-#     extract = extraer_plot_blocks(texto)
-#     if not extract:
-#         return texto
-
-#     def _chunk_list(lst, size):
-#         for i in range(0, len(lst), size):
-#             yield lst[i:i + size]
-
-#     # -------------------------------------------------
-#     # 2️⃣ Crear batches
-#     # -------------------------------------------------
-#     batches = list(_chunk_list(extract, batch_size))
-
-#     # -------------------------------------------------
-#     # 3️⃣ Job IA (batch)
-#     # -------------------------------------------------
-#     def _procesar_batch(batch):
-#         try:
-#             out = graficos_gpt5(df, batch)
-#             if isinstance(out, str):
-#                 try:
-#                     out = _json_loads_loose(out)
-#                 except Exception as e:
-#                     if debug:
-#                         print("Error parseando JSON gráficos:", e)
-#                     return []
-
-#             if not isinstance(out, list):
-#                 return []
-#         except Exception as e:
-#             if debug:
-#                 print("Error IA graficos batch:", e)
-#             return []
-
-#         if not isinstance(out, list):
-#             return []
-
-#         return out  # [{idx, params, span}...]
-
-#     # -------------------------------------------------
-#     # 4️⃣ Ejecutar IA en paralelo
-#     # -------------------------------------------------
-#     resultados_por_idx = {}
-
-#     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-#         futures = [executor.submit(_procesar_batch, batch) for batch in batches]
-
-#         for future in concurrent.futures.as_completed(futures):
-#             try:
-#                 out_batch = future.result()
-#                 for item in out_batch:
-#                     if isinstance(item, dict) and "params" in item:
-#                         resultados_por_idx[item["idx"]] = item
-#             except Exception as e:
-#                 if debug:
-#                     print("Error future gráficos:", e)
-
-#     # -------------------------------------------------
-#     # 5️⃣ Renderizar gráficas (SECUENCIAL)
-#     # -------------------------------------------------
-#     resultados_graficos = []
-
-#     for bloque in sorted(extract, key=lambda b: b["idx"]):
-#         idx = bloque["idx"]
-#         span = bloque["span"]
-
-#         item = resultados_por_idx.get(idx)
-#         if not item:
-#             continue
-
-#         params = item.get("params")
-
-#         try:
-#             fig, ax = plot_from_params(df, params)
-#             uri = _fig_to_data_uri(fig)
-#             resultados_graficos.append((idx, params, span, uri))
-#         except Exception as e:
-#             error_uri = f"data:text/plain;base64,{_to_base64(f'error:{str(e)}')}"
-#             resultados_graficos.append((idx, params, span, error_uri))
-
-#     # -------------------------------------------------
-#     # 6️⃣ Reemplazar en texto
-#     # -------------------------------------------------
-#     texto_reemplazado = aplicar_graficos_en_texto(
-#         texto,
-#         resultados_graficos,
-#         formato="html"
-#     )
-
-#     return texto_reemplazado
-
-
-def process_plot_blocks(df: pd.DataFrame, texto: str):
-    # Ejecutar graficos_gpt5 y asegurar conversión a JSON
+    # -------------------------------------------------
+    # 1️⃣ Extraer bloques
+    # -------------------------------------------------
     extract = extraer_plot_blocks(texto)
-    out = graficos_gpt5(df, extract)
-    if isinstance(out, str):
+    if not extract:
+        return texto
+
+    def _chunk_list(lst, size):
+        for i in range(0, len(lst), size):
+            yield lst[i:i + size]
+
+    # -------------------------------------------------
+    # 2️⃣ Crear batches
+    # -------------------------------------------------
+    batches = list(_chunk_list(extract, batch_size))
+
+    # -------------------------------------------------
+    # 3️⃣ Job IA (batch)
+    # -------------------------------------------------
+    def _procesar_batch(batch):
         try:
-            out = json.loads(out)
-        except json.JSONDecodeError as e:
-            raise ValueError(f"JSON inválido: {e}") from e
+            out = graficos_gpt5(df, batch)
+            if isinstance(out, str):
+                try:
+                    out = _json_loads_loose(out)
+                except Exception as e:
+                    if debug:
+                        print("Error parseando JSON gráficos:", e)
+                    return []
 
-    # Validar tipo
-    if not isinstance(out, list):
-        raise TypeError("El resultado de graficos_gpt5 debe ser una lista de objetos JSON.")
+            if not isinstance(out, list):
+                return []
+        except Exception as e:
+            if debug:
+                print("Error IA graficos batch:", e)
+            return []
 
-    params_list = []
-    resultados_graficos: List[
-        Tuple[int, Dict[str, Any], Union[Tuple[int, int], None], Union[str, Dict[str, str]]]
-    ] = []
-    for item in out:
-        if isinstance(item, dict) and "params" in item:
-            idx, params, span = item["idx"], item["params"], item["span"]
-            params_list.append(params)
+        if not isinstance(out, list):
+            return []
+
+        return out  # [{idx, params, span}...]
+
+    # -------------------------------------------------
+    # 4️⃣ Ejecutar IA en paralelo
+    # -------------------------------------------------
+    resultados_por_idx = {}
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(_procesar_batch, batch) for batch in batches]
+
+        for future in concurrent.futures.as_completed(futures):
             try:
-                fig, ax = plot_from_params(df, params)
-                resultados = _fig_to_data_uri(fig)
-                resultados_graficos.append((idx, params, span, resultados))
+                out_batch = future.result()
+                for item in out_batch:
+                    if isinstance(item, dict) and "params" in item:
+                        resultados_por_idx[item["idx"]] = item
             except Exception as e:
-                # En caso de error, aún registramos la entrada para trazabilidad (sin romper el tipo)
-                error_uri = f"data:text/plain;base64,{_to_base64(f'error:{str(e)}')}"
-                resultados_graficos.append((idx, params, span, error_uri))
+                if debug:
+                    print("Error future gráficos:", e)
+    print(resultados_por_idx)
+    # -------------------------------------------------
+    # 5️⃣ Renderizar gráficas (SECUENCIAL)
+    # -------------------------------------------------
+    resultados_graficos = []
 
-    # 3) Reemplazar spans por data-URIs (elige el formato que prefieras: "uri" | "md" | "html")
-    texto_reemplazado = aplicar_graficos_en_texto(texto, resultados_graficos, formato="html")
+    for bloque in sorted(extract, key=lambda b: b["idx"]):
+        idx = bloque["idx"]
+        span = bloque["span"]
+
+        item = resultados_por_idx.get(idx)
+        if not item:
+            continue
+
+        params = item.get("params")
+
+        try:
+            fig, ax = plot_from_params(df, params)
+            uri = _fig_to_data_uri(fig)
+            resultados_graficos.append((idx, params, span, uri))
+        except Exception as e:
+            error_uri = f"data:text/plain;base64,{_to_base64(f'error:{str(e)}')}"
+            resultados_graficos.append((idx, params, span, error_uri))
+
+    # -------------------------------------------------
+    # 6️⃣ Reemplazar en texto
+    # -------------------------------------------------
+    texto_reemplazado = aplicar_graficos_en_texto(
+        texto,
+        resultados_graficos,
+        formato="html"
+    )
 
     return texto_reemplazado
+
+
+# def process_plot_blocks(df: pd.DataFrame, texto: str):
+#     # Ejecutar graficos_gpt5 y asegurar conversión a JSON
+#     extract = extraer_plot_blocks(texto)
+#     out = graficos_gpt5(df, extract)
+#     if isinstance(out, str):
+#         try:
+#             out = json.loads(out)
+#         except json.JSONDecodeError as e:
+#             raise ValueError(f"JSON inválido: {e}") from e
+
+#     # Validar tipo
+#     if not isinstance(out, list):
+#         raise TypeError("El resultado de graficos_gpt5 debe ser una lista de objetos JSON.")
+
+#     params_list = []
+#     resultados_graficos: List[
+#         Tuple[int, Dict[str, Any], Union[Tuple[int, int], None], Union[str, Dict[str, str]]]
+#     ] = []
+#     for item in out:
+#         if isinstance(item, dict) and "params" in item:
+#             idx, params, span = item["idx"], item["params"], item["span"]
+#             params_list.append(params)
+#             try:
+#                 fig, ax = plot_from_params(df, params)
+#                 resultados = _fig_to_data_uri(fig)
+#                 resultados_graficos.append((idx, params, span, resultados))
+#             except Exception as e:
+#                 # En caso de error, aún registramos la entrada para trazabilidad (sin romper el tipo)
+#                 error_uri = f"data:text/plain;base64,{_to_base64(f'error:{str(e)}')}"
+#                 resultados_graficos.append((idx, params, span, error_uri))
+
+#     # 3) Reemplazar spans por data-URIs (elige el formato que prefieras: "uri" | "md" | "html")
+#     texto_reemplazado = aplicar_graficos_en_texto(texto, resultados_graficos, formato="html")
+
+#     return texto_reemplazado
 
 
 # @register("aplicar_multiples_columnas_gpt5")
@@ -1535,44 +1535,51 @@ def exportar_output_a_html(
             return html_final
         raise e
 
-
 def columnas_a_texto(df: pd.DataFrame, col1: str, col2: str, *, 
                      sep: str = "\n\n", dropna: bool = True, strip: bool = True) -> str:
     """
-    Devuelve un string con los valores de col1 y col2 en orden horizontal por filas:
-    fila1: col1, col2; fila2: col1, col2; ... separados por sep (default: salto de línea).
-    
-    Parámetros:
-        df: DataFrame de entrada.
-        col1, col2: nombres de columnas a considerar.
-        sep: separador entre valores en el texto final (por defecto '\n').
-        dropna: si True, omite celdas NaN/None.
-        strip: si True, hace strip() a cada valor convertido a string.
+    Igual que antes, pero ahora cada par (col1, col2) queda envuelto en:
+        <div class="Apendice {idx}"> ... </div>
+    donde idx es el número de fila (comenzando en 1).
     """
-    # Validaciones básicas
+
+    # Validaciones
     for c in (col1, col2):
         if c not in df.columns:
             raise ValueError(f"La columna '{c}' no existe en el DataFrame.")
-    
-    piezas = []
-    # Itera por filas y dentro de cada fila recorre col1 -> col2 (orden horizontal)
+
+    bloques = []  # aquí se almacenará cada Apendice idx
+    apendice_idx = 1
+
+    # Procesar fila por fila
     for a, b in df[[col1, col2]].itertuples(index=False, name=None):
+
+        partes = []  # contenido interno del Apendice
+
         for idx, v in enumerate((a, b)):
             if v is None or (isinstance(v, float) and pd.isna(v)):
                 if dropna:
                     continue
-                v = ""  # si no dropna, representa NA como cadena vacía
+                v = ""
+
             s = str(v)
             if strip:
                 s = s.strip()
 
-            # 👉 SOLO col1 (idx == 0) se marca como título
+            # col1 → Título
             if idx == 0:
-                s = f'<span class="titulo">{s}</span>'
+                    s = f'<span class="titulo">{s}</span>'
 
-            piezas.append(s)
-    
-    return sep.join(piezas)
+            partes.append(s)
+
+        # Construir el bloque del apéndice solo si tiene contenido
+        if partes:
+            bloque = f'<div class="Apendice {apendice_idx}">' + sep.join(partes) + '</div>'
+            bloques.append(bloque)
+            apendice_idx += 1
+
+    return sep.join(bloques)
+
 
 
 def limpieza_final(texto: str) -> str:
@@ -1805,3 +1812,384 @@ def expand_json_column(df, json_col, fields_to_extract, rename_map=None):
         df_new = df_new.rename(columns=rename_map)
 
     return df_new
+
+
+import re
+
+def filtrar_apendices(texto: str, agente_result: dict, *, renumerar=True):
+    """
+    Filtra bloques <div class="Apendice N">...</div> de acuerdo con la salida
+    del agente de clasificación.
+
+    El diccionario agente_result DEBE tener la forma:
+    {
+        "conservar": [1, 2, ...],
+        "borrar": [3, 4, ...]
+    }
+
+    Reglas:
+    - Si un índice está en 'borrar', SIEMPRE se elimina aunque aparezca en 'conservar'.
+    - Si 'conservar' está vacío pero 'borrar' tiene elementos → se conservan los demás.
+    - Si ambos están vacíos → no se modifica nada.
+    - Si un índice no existe en el texto → se ignora silenciosamente.
+    - Después del filtrado, si renumerar=True, los apéndices se renumeran 1..N.
+    """
+
+    # Validación mínima de entrada
+    if not isinstance(agente_result, dict):
+        raise ValueError("agente_result debe ser un diccionario con 'conservar' y 'borrar'.")
+
+    conservar = agente_result.get("conservar", [])
+    borrar = agente_result.get("borrar", [])
+
+    # Normalización
+    conservar = set(int(x) for x in conservar if isinstance(x, int) or str(x).isdigit())
+    borrar = set(int(x) for x in borrar if isinstance(x, int) or str(x).isdigit())
+
+    # Si un índice aparece en ambos → se borra
+    borrar = borrar.union(conservar.intersection(borrar))
+
+    # Regex para capturar apéndices completos
+    patron = re.compile(
+        r'<div class="Apendice\s+(\d+)">(.*?)</div>',
+        re.S | re.I
+    )
+
+    bloques = patron.findall(texto)  # lista de (idx_str, contenido)
+
+    if not bloques:
+        return texto  # no hay apéndices → retornar sin cambios
+
+    nuevos_bloques = []
+
+    for idx_str, contenido in bloques:
+        idx = int(idx_str)
+
+        # 1) Prioridad absoluta: si está en BORRAR → se elimina
+        if idx in borrar:
+            continue
+
+        # 2) Si 'conservar' está vacío → conservar todos los que no estén en borrar
+        if not conservar:
+            nuevos_bloques.append((idx, contenido))
+            continue
+
+        # 3) Si 'conservar' NO está vacío → conservar solo esos índices
+        if idx in conservar:
+            nuevos_bloques.append((idx, contenido))
+
+    # Si nada queda después del filtrado
+    if not nuevos_bloques:
+        return ""  # o retorna texto, según tu política
+
+    # Reconstrucción del mensaje final
+    salida = []
+    if renumerar:
+        for nuevo_idx, (_, contenido) in enumerate(nuevos_bloques, start=1):
+            salida.append(f'<div class="Apendice {nuevo_idx}">{contenido}</div>')
+    else:
+        for (idx, contenido) in nuevos_bloques:
+            salida.append(f'<div class="Apendice {idx}">{contenido}</div>')
+
+    return "\n\n".join(salida)
+
+
+import json
+import re
+
+def normalizar_salida_agente(salida):
+    """
+    Normaliza lo que devuelva apendices_gpt5 en un dict seguro:
+    {
+        "conservar": [...],
+        "borrar": [...]
+    }
+    """
+
+    # ============================
+    # 1. SI ES STRING → intentar parse JSON
+    # ============================
+    if isinstance(salida, str):
+        s = salida.strip()
+
+        # Intento 1: JSON directo
+        try:
+            salida = json.loads(s)
+        except Exception:
+            # Intento 2: extraer JSON dentro de texto más largo
+            match = re.search(r"\{.*\}", s, re.S)
+            if match:
+                try:
+                    salida = json.loads(match.group(0))
+                except Exception:
+                    salida = {}
+            else:
+                salida = {}
+
+    # ============================
+    # 2. SI NO ES DICT → forzar dict vacío
+    # ============================
+    if not isinstance(salida, dict):
+        salida = {}
+
+    # ============================
+    # 3. CREAR LLAVES SI NO EXISTEN
+    # ============================
+    conservar = salida.get("conservar", [])
+    borrar = salida.get("borrar", [])
+
+    # ============================
+    # 4. FORZAR LISTAS
+    # ============================
+    if not isinstance(conservar, list):
+        conservar = []
+    if not isinstance(borrar, list):
+        borrar = []
+
+    # ============================
+    # 5. CONVERTIR A ENTEROS VÁLIDOS
+    # ============================
+    conservar = [int(x) for x in conservar if str(x).isdigit()]
+    borrar = [int(x) for x in borrar if str(x).isdigit()]
+
+    return {"conservar": conservar, "borrar": borrar}
+
+
+def procesar_apendices(texto: str, *, renumerar=True) -> str:
+    """
+    Orquesta el proceso:
+    1. Ejecuta apendices_gpt5(texto)
+    2. Normaliza su salida para garantizar dict válido
+    3. Aplica filtrar_apendices()
+    """
+
+    # ============================================================
+    # 1. EJECUTAR AGENTE
+    # ============================================================
+    try:
+        agente_raw = apendices_gpt5(texto)
+    except Exception as e:
+        raise RuntimeError(f"Error al ejecutar apendices_gpt5: {e}")
+
+    # ============================================================
+    # 2. NORMALIZAR SALIDA DEL AGENTE (NUNCA lanza excepción)
+    # ============================================================
+    agente_result = normalizar_salida_agente(agente_raw)
+
+    # ============================================================
+    # 3. FILTRAR APÉNDICES
+    # ============================================================
+    try:
+        texto_filtrado = filtrar_apendices(texto, agente_result, renumerar=renumerar)
+    except Exception as e:
+        raise RuntimeError(f"Error al filtrar apéndices: {e}")
+
+    return texto_filtrado
+
+
+@register("extraer_titulos")
+def extraer_titulos(texto: str):
+    """
+    Extrae todos los títulos del tipo:
+        <span class="titulo">TEXTO</span>
+
+    Devuelve una lista de dicts:
+    [
+        {
+            "idx": 1,
+            "titulo": "INTRODUCCIÓN",
+            "span": (start, end)
+        },
+        ...
+    ]
+    """
+
+    # Patrón robusto:
+    # - Acepta otros atributos dentro del span
+    # - Captura cualquier texto interno
+    # - Respeta saltos de línea
+    patron = re.compile(
+        r'<span\s+class=["\']titulo["\'][^>]*>(.*?)</span>',
+        re.I | re.S
+    )
+
+    bloques = []
+
+    for i, match in enumerate(patron.finditer(texto), start=1):
+        titulo = match.group(1).strip()
+        bloques.append({
+            "idx": i,
+            "titulo": titulo,
+            "span": match.span()
+        })
+
+    return bloques
+
+
+def aplicar_titulos_numerados(texto: str, titulos_numerados) -> str:
+    """
+    Reemplaza en `texto` cada <span class="titulo">...</span> por su versión numerada.
+
+    titulos_numerados:
+        Lista de diccionarios con estructura:
+        {
+            "idx": N,
+            "titulo": "1.2 Perfil hematológico",  # título ya numerado
+            "span": [start, end]                 # span del título original en el HTML
+        }
+
+    Funciona igual que aplicar_operaciones_en_texto:
+    - Aplica reemplazos de derecha a izquierda.
+    - Preserva la integridad del HTML.
+    - Acepta spans tipo lista o diccionario.
+    """
+
+    reemplazos = []
+
+    for item in titulos_numerados:
+        # Validar estructura mínima
+        if not isinstance(item, dict):
+            continue
+
+        idx = item.get("idx")
+        nuevo_titulo = item.get("titulo")
+        span_obj = item.get("span")
+
+        # Validación de título
+        if not isinstance(nuevo_titulo, str) or not nuevo_titulo.strip():
+            continue
+
+        # Normalizar span
+        if isinstance(span_obj, dict):
+            span_list = span_obj.get("span") or span_obj.get("spam")
+        else:
+            span_list = span_obj
+
+        if not (isinstance(span_list, (list, tuple)) and len(span_list) == 2):
+            continue
+
+        start, end = span_list
+        if not (isinstance(start, int) and isinstance(end, int) and 0 <= start <= end <= len(texto)):
+            continue
+
+        # Reemplazo final:
+        # Sustituimos TODO el <span class="titulo">...</span> por el nuevo número + título
+        reemplazo = f'<span class="titulo">{nuevo_titulo}</span>'
+
+        reemplazos.append((start, end, reemplazo))
+
+    # Aplicar reemplazos de derecha a izquierda para NO dañar offsets
+    reemplazos.sort(key=lambda t: t[0], reverse=True)
+
+    out = texto
+    for start, end, rep in reemplazos:
+        out = out[:start] + rep + out[end:]
+
+    return out
+
+def generar_tabla_contenido(titulos_numerados) -> str:
+    """
+    Construye un bloque de texto plano con la tabla de contenido.
+
+    Parámetro:
+        titulos_numerados: lista de dicts con estructura:
+        {
+            "idx": N,
+            "titulo": "1.2 Perfil hematológico",  # título ya numerado
+            "span": [inicio, fin]
+        }
+
+    Retorno:
+        Texto plano con el encabezado 'Tabla de contenido' seguido por los títulos numerados.
+    """
+
+    if not isinstance(titulos_numerados, list):
+        raise TypeError("titulos_numerados debe ser una lista de dicts.")
+
+    lineas = ["Tabla de contenido"]
+
+    for item in titulos_numerados:
+        if not isinstance(item, dict):
+            continue
+
+        titulo = item.get("titulo")
+        if isinstance(titulo, str) and titulo.strip():
+            lineas.append(titulo.strip())
+
+    return "\n".join(lineas)
+
+def process_titulo_blocks(texto: str) -> str:
+    """
+    1. Extrae títulos con extraer_titulos(texto)
+    2. Ejecuta titulos_gpt5 para numerarlos
+    3. Normaliza y valida la salida JSON
+    4. Aplica aplicar_titulos_numerados() para reemplazar los títulos en el HTML
+
+    Devuelve el texto final con títulos numerados.
+    """
+
+    # ============================================================
+    # 1) EXTRAER TITULOS
+    # ============================================================
+    try:
+        extract = extraer_titulos(texto)
+    except Exception as e:
+        raise RuntimeError(f"Error al extraer títulos: {e}")
+
+    # Si no hay títulos, retornar igual
+    if not extract:
+        return texto
+
+    # ============================================================
+    # 2) EJECUTAR AGENTE titulos_gpt5
+    # ============================================================
+    try:
+        out = titulos_gpt5(extract)
+    except Exception as e:
+        raise RuntimeError(f"Error al ejecutar titulos_gpt5: {e}")
+
+    # ============================================================
+    # 3) NORMALIZAR SALIDA DEL AGENTE
+    # ============================================================
+    if isinstance(out, str):
+        out_str = out.strip()
+        try:
+            out = json.loads(out_str)
+        except Exception:
+            # intentar extraer json interno
+            match = re.search(r"\[.*\]", out_str, re.S)
+            if match:
+                try:
+                    out = json.loads(match.group(0))
+                except Exception:
+                    raise ValueError(f"titulos_gpt5 devolvió un JSON inválido: {out_str}")
+            else:
+                raise ValueError(f"titulos_gpt5 no devolvió un JSON válido: {out_str}")
+
+    # ============================================================
+    # 4) VALIDAR TIPO
+    # ============================================================
+    if not isinstance(out, list):
+        raise TypeError("El resultado de titulos_gpt5 debe ser una LISTA de objetos JSON.")
+
+    # Validar estructura mínima de cada item
+    for item in out:
+        if not isinstance(item, dict):
+            raise TypeError("Cada elemento del JSON de salida debe ser un dict.")
+
+        if "idx" not in item or "titulo" not in item or "span" not in item:
+            raise ValueError(
+                "Cada dict debe tener las llaves 'idx', 'titulo' y 'span'."
+            )
+
+    tabla_contenido = generar_tabla_contenido(out)
+
+    # ============================================================
+    # 5) REEMPLAZAR TITULOS EN EL HTML
+    # ============================================================
+    try:
+        texto_final = aplicar_titulos_numerados(texto, out)
+    except Exception as e:
+        raise RuntimeError(f"Error al reemplazar títulos numerados: {e}")
+
+    return texto_final, tabla_contenido

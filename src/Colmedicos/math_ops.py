@@ -30,6 +30,34 @@ _DATETIME_COERCION_CACHE = {}
 _STRING_COERCION_CACHE = {}
 
 
+_OPS = {
+    '>': operator.gt,
+    '<': operator.lt,
+    '==': operator.eq,
+    '!=': operator.ne,
+    '>=': operator.ge,
+    '<=': operator.le,
+    'in':  lambda a, b: a.isin(b),
+    'not in': lambda a, b: ~a.isin(b),
+
+    # --- Nuevos operadores matemáticos con soporte textual ---
+    'contains':   lambda a, s: a.astype(str).str.contains(str(s), case=False, na=False),
+    'startswith': lambda a, s: a.astype(str).str.startswith(str(s), na=False),
+    'endswith':   lambda a, s: a.astype(str).str.endswith(str(s), na=False),
+
+    # LIKE estilo SQL
+    'like': lambda a, pat: a.astype(str).str.contains(
+        str(pat).replace("%", ""), case=False, na=False
+    ),
+
+    # regex
+    'regex': lambda a, pat: a.astype(str).str.contains(
+        pat, regex=True, na=False
+    ),
+}
+
+
+
 
 @register("suma_condicional_multiple")
 def suma_condicional_multiple(df, columna_suma, condiciones):
@@ -44,15 +72,7 @@ def suma_condicional_multiple(df, columna_suma, condiciones):
         ('Categoria', '==', 'B')
     ])
     """
-    operadores = {
-        '>': operator.gt,
-        '<': operator.lt,
-        '==': operator.eq,
-        '!=': operator.ne,
-        '>=': operator.ge,
-        '<=': operator.le,
-        'in': lambda a, b: a.isin(b)
-    }
+    operadores = _OPS
 
     mascara = pd.Series(True, index=df.index)
     for col, op, val in condiciones:
@@ -70,16 +90,7 @@ def conteo_condicional_multiple(
     if columna_conteo not in df.columns:
         raise ValueError(f"La columna '{columna_conteo}' no existe en el DataFrame.")
 
-    ops = {
-        '>': operator.gt,
-        '<': operator.lt,
-        '==': operator.eq,
-        '!=': operator.ne,
-        '>=': operator.ge,
-        '<=': operator.le,
-        'in':  lambda a, b: a.isin(b),
-        'not in': lambda a, b: ~a.isin(b),
-    }
+    ops = _OPS
 
     # Construir máscara condicional
     mascara = pd.Series(True, index=df.index)
@@ -123,16 +134,7 @@ def promedio_condicional_multiple(
     if columna_promedio not in df.columns:
         raise ValueError(f"La columna '{columna_promedio}' no existe en el DataFrame.")
 
-    ops = {
-        '>': operator.gt,
-        '<': operator.lt,
-        '==': operator.eq,
-        '!=': operator.ne,
-        '>=': operator.ge,
-        '<=': operator.le,
-        'in': lambda a, b: a.isin(b),
-        'not in': lambda a, b: ~a.isin(b),
-    }
+    ops = _OPS
 
     # Construir máscara condicional
     mascara = pd.Series(True, index=df.index)
@@ -442,20 +444,25 @@ def _coerce_for_op(series: pd.Series, op: str, val: Any):
     return (series.astype(str), v, 'raw')
 
 def _apply_op(series: pd.Series, op: str, val: Any) -> pd.Series:
+    # --- operadores set ---
     if op == 'in':
-        # val es lista
         return series.isin(val)
     if op == 'not in':
         return ~series.isin(val)
 
+    # --- operadores textuales nuevos ---
+    if op in ("contains", "icontains", "startswith", "endswith", "like", "regex"):
+        return _OPS[op](series, val)
+
+    # --- operadores numéricos tradicionales ---
     OP = {
-        '>': operator.gt, '<': operator.lt, '>=': operator.ge, '<=': operator.le,
-        '==': operator.eq, '!=': operator.ne
+        '>': operator.gt, '<': operator.lt, '>=': operator.ge,
+        '<=': operator.le, '==': operator.eq, '!=': operator.ne
     }[op]
 
     out = OP(series, val)
-    # Asegura booleanos (los NaN → False)
     return out.fillna(False)
+
 
 def _mask_from_conditions(df: pd.DataFrame, condiciones: List[List[Any]], logic: str = "AND") -> pd.Series:
     """

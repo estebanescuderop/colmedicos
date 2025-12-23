@@ -1,7 +1,7 @@
 
-from Colmedicos.io_utils_remaster import process_ia_blocks, process_data_blocks, process_plot_blocks, _render_vars_text, exportar_output_a_html, _fig_to_data_uri, _format_result_plain, columnas_a_texto, aplicar_multiples_columnas_gpt5, unpivot_df, dividir_columna_en_dos, procesar_codigos_cie10, unir_dataframes, expand_json_column
+from Colmedicos.io_utils_remaster import process_ia_blocks, process_data_blocks, process_plot_blocks, _render_vars_text, exportar_output_a_html, _fig_to_data_uri, _format_result_plain, columnas_a_texto, aplicar_multiples_columnas_gpt5, unpivot_df, dividir_columna_en_dos, procesar_codigos_cie10, unir_dataframes, expand_json_column, procesar_apendices, filtrar_apendices,process_titulo_blocks
 import pandas as pd
-from Colmedicos.ia import ask_gpt5, operaciones_gpt5, graficos_gpt5,portada_gpt5, columns_batch_gpt5
+from Colmedicos.ia import ask_gpt5, operaciones_gpt5, graficos_gpt5, columns_batch_gpt5, apendices_gpt5
 from Colmedicos.io_utils import aplicar_plot_por_tipo_desde_output, aplicar_ia_por_tipo, generar_output, mostrar_html
 from Colmedicos.charts import plot_from_params
 from Colmedicos.math_ops import ejecutar_operaciones_condicionales
@@ -264,8 +264,15 @@ tareas = [
       },
       "registro_cols": "habitos_tabaquismo1",
       "nueva_columna": "Fuma regularmente"
+    },
+    {"criterios":{"Es satisfactorio": "Se usa cuando el concepto médico indica explicitamente que es satisfactorios o positivo, además todo lo que no cabe en las otras definiciones", 
+                  "Es necesario expedir recomendaciones medicas en el trabajo": "Se usa cuando en el concepto se hace referencia a dejar algunas recomendaciones", 
+                  "Presenta alteración en su estado de salud que no le impide desempeñar su trabajo habitual": "Se clasifica en esta, cuando de forma explicita indica que presenta alteraciones en su salud pero que no le impide desempeñar sus funciones"
+      },
+      "registro_cols": "concepto_aptitud",
+      "nueva_columna": "concepto_aptitud"
     }
-    ]
+]
 
 campos = ["lab_grupo", "lab_item_unificado", "lab_Resultado_global"]
 renombres = {
@@ -344,15 +351,25 @@ df_datico.to_excel(r"C:\Users\EstebanEscuderoPuert\Downloads\output_.xlsx", inde
 #                                 columnas=["obs_osteomuscular"],
 #                                 nueva_columna="analisis_osteomuscular")
 
-#df_datos.to_excel(r"C:\Users\EstebanEscuderoPuert\Downloads\output_.xlsx", index=False, engine="openpyxl")
+# #df_datos.to_excel(r"C:\Users\EstebanEscuderoPuert\Downloads\output_.xlsx", index=False, engine="openpyxl")
 # ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\output_.xlsx"
 # df_otro = pd.read_excel(ruta_archivos)
 
 # texto_completo = columnas_a_texto(df,"Titulo","Contenido")
 
-#out2 = process_data_blocks(df_otro,texto_completo)
-# out2 = process_ia_blocks(out2)
-# out2 = process_plot_blocks(df_otro,out2)
+
+# out2 = process_data_blocks(df_otro,texto_completo)
+# # out2 = procesar_apendices(out2)
+# out2, tabla = process_titulo_blocks(out2)
+# out2 = tabla + out2
+# filtro = {
+#   "conservar": [6, 7, 11, 12, 13, 14, 17, 18, 19, 20, 21, 23, 25, 26, 27, 29, 30, 31, 32, 34, 36, 37, 38, 39, 44, 45],
+#   "borrar": [1, 2, 3, 4, 5, 8, 9, 10, 15, 16, 22, 24, 28, 33, 35, 40, 41, 42, 43]
+# }
+# out2 = filtrar_apendices(texto_completo,filtro)
+#out2 = procesar_apendices(out2)
+# # out2 = process_ia_blocks(out2)
+# out2 = process_plot_blocks(df_otro, texto_completo)
 
 # from Colmedicos.io_utils_remaster import extraer_data_blocks, aplicar_operaciones_en_texto
 # out = extraer_data_blocks(texto_completo)
