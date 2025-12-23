@@ -206,7 +206,7 @@ def informe_final(
         else:
             logs.append("Procesamiento de gráficas: SKIP (sin tokens)")
 
-        text_for_next = remover_contenedores_apendice(text_for_next)
+        #text_for_next = remover_contenedores_apendice(text_for_next)
         #text_for_next = limpieza_final(text_for_next)
         
         # 5) Exportar HTML (evitar E/S si no se requiere)
