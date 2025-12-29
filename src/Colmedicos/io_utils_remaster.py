@@ -172,7 +172,7 @@ def aplicar_ia_en_texto(texto: str, resultados_ia, formato: str = "html") -> str
 
         # --- construir reemplazo ---
         if formato == "html":
-            rep = f'<span class="ia-bloque_{idx}">{resultado_ia}</span>'
+            rep = f'<div class="análisis_{idx}">{resultado_ia}</div>'
         else:
             rep = f"[IA bloque {idx}] {resultado_ia}"
 
@@ -1370,119 +1370,81 @@ def exportar_output_a_html(
 <style>
   :root{
     --doc-max: 820px;
-    --font: -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Noto Sans", Ubuntu, "Apple Color Emoji", "Segoe UI Emoji";
+    --font: -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Noto Sans", Ubuntu;
     --text: #1e2329;
     --muted:#667085;
-    --accent:#25347a;     /* azul corporativo sugerido */
-    --accent-2:#58b12e;   /* verde corporativo sugerido */
+    --accent:#25347a;
+    --accent-2:#58b12e;
     --border:#e6e8ec;
     --bg:#ffffff;
   }
   *{ box-sizing:border-box; }
 
-  html,body{ background:var(--bg); color:var(--text); }
   body{
     font-family: var(--font);
+    color: var(--text);
     margin:0;
-    -webkit-font-smoothing:antialiased;
-    -moz-osx-font-smoothing:grayscale;
+    background:#fff;
+    line-height:1.65;
+    font-size:15px;
   }
 
-  /* Contenedor tipo documento */
   main{
     max-width: var(--doc-max);
-    margin: 28px auto;
-    padding: 0 20px 40px;
-    line-height: 1.65;
-    font-size: 15.5px;
+    margin: 24px auto;
+    padding: 0 18px 32px;
   }
 
-  /* Encabezados – sobrios y legibles */
-  h1,h2,h3,h4{
+  h1,h2,h3{
     color: var(--accent);
-    margin: 22px 0 12px;
     line-height:1.25;
-    letter-spacing: .2px;
   }
-  h1{ font-size: 28px; border-bottom: 2px solid var(--accent-2); padding-bottom: 8px; }
-  h2{ font-size: 22px; margin-top: 28px; }
-  h3{ font-size: 18px; }
-  h4{ font-size: 16px; color:#2d3440; }
-
-  p{ margin: 10px 0 12px; text-align: justify; text-justify: inter-word; }
-  em, i{ color: var(--muted); }
-
-  /* Imágenes y figuras (centradas, más pequeñas por defecto) */
-  img{ max-width:100%; height:auto; }
-  .img-doc{
-    display:block;
-    margin: 12px auto;
-    max-width: 58%;   /* <- tamaño “más pequeño” dentro del texto */
-    height:auto;
+  h1{
+    font-size:26px;
+    margin-top:40px;
+    border-bottom:2px solid var(--accent-2);
+    padding-bottom:6px;
+    page-break-before: always;
   }
-  .caption{
+  h2{ font-size:20px; margin-top:28px; }
+  h3{ font-size:16px; margin-top:20px; }
+
+  p{ margin:10px 0; text-align:justify; }
+
+  section{ page-break-inside: avoid; }
+
+  /* Figuras */
+  figure{
+    margin:16px auto 20px;
     text-align:center;
-    font-size: 13px;
-    color: var(--muted);
-    margin-top: 6px;
+    page-break-inside: avoid;
+  }
+  figure img{
+    max-width:100%;
+    max-height:14cm;
+    object-fit:contain;
+  }
+  figcaption{
+    font-size:12px;
+    color:var(--muted);
+    margin-top:6px;
   }
 
-  /* Listas y citas */
-  ul,ol{ padding-left: 22px; margin: 8px 0 14px; }
-  blockquote{
-    margin: 14px 0;
-    padding: 10px 14px;
-    border-left: 3px solid var(--accent-2);
-    background: #f7faf7;
-    color:#2f3b2f;
+  /* Bloques de análisis */
+  .analysis{
+    background:#f5f7fa;
+    border-left:4px solid var(--accent);
+    padding:12px 14px;
+    margin:16px 0;
   }
 
-  /* Tablas con zebra */
-  table{
-    width:100%;
-    border-collapse:collapse;
-    margin: 14px 0 18px;
-    font-size: 14px;
-  }
-  th,td{
-    border: 1px solid var(--border);
-    padding: 8px 10px;
-    vertical-align: top;
-  }
-  th{
-    background:#f7f8fb;
-    color:#2d3440;
-    font-weight:600;
-  }
-  tbody tr:nth-child(odd){ background:#fbfcfe; }
+  /* Tabla de contenido */
+  .toc ol{ padding-left:20px; }
 
-  /* Separadores */
-  hr{
-    border:0; border-top:1px solid var(--border);
-    margin: 18px 0;
-  }
-
-  /* Page breaks visibles en pantalla, reales en impresión */
-  .page-break{
-    display:block; height:0; margin: 24px 0; border:0;
-    border-top: 2px dashed #ccd2da;
-  }
   @media print{
-    @page{ margin: 1.8cm; }
-    body{ background:#fff; }
+    @page{ size:A4; margin:2cm; }
     main{ padding:0; }
-    .page-break{
-      page-break-before: always;
-      border:0; margin:0; height:0;
-    }
-    a[href]:after{ content:""; } /* limpiar urls impresas */
   }
-
-  /* Utilidades por si las necesitas en tu contenido */
-  .center{text-align:center;}
-  .right{text-align:right;}
-  .muted{color:var(--muted);}
-  .w-50{max-width:50%;} .w-60{max-width:60%;} .w-70{max-width:70%;}
 </style>
 """
 
@@ -1534,27 +1496,58 @@ def exportar_output_a_html(
         if devolver_html_si_falla_write:
             return html_final
         raise e
+import re
+import unicodedata
+import pandas as pd
 
-def columnas_a_texto(df: pd.DataFrame, col1: str, col2: str, *, 
-                     sep: str = "\n\n", dropna: bool = True, strip: bool = True) -> str:
+
+def columnas_a_texto(
+    df: pd.DataFrame,
+    col1: str,
+    col2: str,
+    *,
+    sep: str = "\n\n",
+    dropna: bool = True,
+    strip: bool = True
+) -> str:
     """
-    Igual que antes, pero ahora cada par (col1, col2) queda envuelto en:
-        <div class="Apendice {idx}"> ... </div>
-    donde idx es el número de fila (comenzando en 1).
+    Toma dos columnas (col1 = título, col2 = contenido) y genera un HTML donde
+    cada fila se convierte en un apéndice:
+
+        <section class="toc Apendice N" id="apendice-N-slug-del-titulo">
+            <h1>TÍTULO</h1>
+            ...contenido...
+        </section>
+
+    - N empieza en 1.
+    - El id se construye a partir del título normalizado.
     """
 
-    # Validaciones
+    # --- Validaciones de columnas ---
     for c in (col1, col2):
         if c not in df.columns:
             raise ValueError(f"La columna '{c}' no existe en el DataFrame.")
 
-    bloques = []  # aquí se almacenará cada Apendice idx
+    # --- Helper interno para generar slugs a partir del título ---
+    def _slugify(text: str) -> str:
+        if text is None:
+            return "apendice"
+        s = str(text)
+        # Normalizar tildes
+        s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
+        s = s.lower()
+        # Reemplazar todo lo que no sea alfanumérico por guiones
+        s = re.sub(r"[^a-z0-9]+", "-", s)
+        s = s.strip("-")
+        return s or "apendice"
+
+    bloques: list[str] = []
     apendice_idx = 1
 
-    # Procesar fila por fila
+    # --- Procesar fila por fila ---
     for a, b in df[[col1, col2]].itertuples(index=False, name=None):
-
-        partes = []  # contenido interno del Apendice
+        partes: list[str] = []
+        titulo_plano: str | None = None  # para usar en el id
 
         for idx, v in enumerate((a, b)):
             if v is None or (isinstance(v, float) and pd.isna(v)):
@@ -1566,20 +1559,28 @@ def columnas_a_texto(df: pd.DataFrame, col1: str, col2: str, *,
             if strip:
                 s = s.strip()
 
-            # col1 → Título
+            # col1 → Título (primer valor)
             if idx == 0:
-                    s = f'<span class="titulo">{s}</span>'
+                titulo_plano = s
+                s = f"<h1>{s}</h1>"
 
             partes.append(s)
 
         # Construir el bloque del apéndice solo si tiene contenido
         if partes:
-            bloque = f'<div class="Apendice {apendice_idx}">' + sep.join(partes) + '</div>'
+            slug = _slugify(titulo_plano)
+            id_attr = f"apendice-{apendice_idx}-{slug}"
+
+            # Mantiene la numeración en la clase, añade 'toc' y el id
+            bloque = (
+                f'<section class="Apendice {apendice_idx}" id="{id_attr}">'
+                + sep.join(partes)
+                + "</section>"
+            )
             bloques.append(bloque)
             apendice_idx += 1
 
     return sep.join(bloques)
-
 
 
 def limpieza_final(texto: str) -> str:
@@ -1596,8 +1597,6 @@ def limpieza_final(texto: str) -> str:
     #texto = re.sub(r" +\n", "\n", texto)
 
     return texto.strip()
-
-
 
 def unpivot_df(df: pd.DataFrame,
                columnas_unpivot: list,
@@ -1816,12 +1815,31 @@ def expand_json_column(df, json_col, fields_to_extract, rename_map=None):
 
 import re
 
-def filtrar_apendices(texto: str, agente_result: dict, *, renumerar=True):
+def _actualizar_indice_apendice_en_tag(open_tag: str, nuevo_idx: int) -> str:
     """
-    Filtra bloques <div class="Apendice N">...</div> de acuerdo con la salida
-    del agente de clasificación.
+    Dado un <section ... class="... Apendice 3 ...">,
+    reemplaza solo el '3' por nuevo_idx, preservando id y demás atributos.
+    """
+    def _repl(m: re.Match) -> str:
+        # m.group(1) = 'class="... Apendice '
+        # m.group(2) = número actual
+        # m.group(3) = resto hasta el cierre de comillas
+        return f'{m.group(1)}{nuevo_idx}{m.group(3)}'
 
-    El diccionario agente_result DEBE tener la forma:
+    return re.sub(
+        r'(class=["\'][^"\']*Apendice\s+)(\d+)([^"\']*["\'])',
+        _repl,
+        open_tag,
+        flags=re.I
+    )
+
+
+def filtrar_apendices(texto: str, agente_result: dict, *, renumerar: bool = True) -> str:
+    """
+    Filtra bloques <section ... class="Apendice N" ...>...</section> de acuerdo con
+    la salida del agente de clasificación.
+
+    agente_result:
     {
         "conservar": [1, 2, ...],
         "borrar": [3, 4, ...]
@@ -1833,63 +1851,72 @@ def filtrar_apendices(texto: str, agente_result: dict, *, renumerar=True):
     - Si ambos están vacíos → no se modifica nada.
     - Si un índice no existe en el texto → se ignora silenciosamente.
     - Después del filtrado, si renumerar=True, los apéndices se renumeran 1..N.
+    - Se preservan id="..." y demás atributos del <section>.
     """
 
-    # Validación mínima de entrada
     if not isinstance(agente_result, dict):
         raise ValueError("agente_result debe ser un diccionario con 'conservar' y 'borrar'.")
 
     conservar = agente_result.get("conservar", [])
-    borrar = agente_result.get("borrar", [])
+    borrar    = agente_result.get("borrar", [])
 
-    # Normalización
+    # Normalización a enteros
     conservar = set(int(x) for x in conservar if isinstance(x, int) or str(x).isdigit())
-    borrar = set(int(x) for x in borrar if isinstance(x, int) or str(x).isdigit())
+    borrar    = set(int(x) for x in borrar    if isinstance(x, int) or str(x).isdigit())
 
     # Si un índice aparece en ambos → se borra
     borrar = borrar.union(conservar.intersection(borrar))
 
-    # Regex para capturar apéndices completos
+    # Capturamos:
+    # 1) el tag de apertura completo (<section ...>)
+    # 2) el índice de Apendice (\d+)
+    # 3) el contenido interno (.*?)
     patron = re.compile(
-        r'<div class="Apendice\s+(\d+)">(.*?)</div>',
+        r'(<section[^>]*class=["\'][^"\']*Apendice\s+(\d+)[^"\']*["\'][^>]*>)(.*?)</section\s*>',
         re.S | re.I
     )
 
-    bloques = patron.findall(texto)  # lista de (idx_str, contenido)
-
-    if not bloques:
-        return texto  # no hay apéndices → retornar sin cambios
+    matches = list(patron.finditer(texto))
+    if not matches:
+        return texto  # no hay apéndices → nada que hacer
 
     nuevos_bloques = []
 
-    for idx_str, contenido in bloques:
+    for m in matches:
+        open_tag   = m.group(1)  # <section ...>
+        idx_str    = m.group(2)  # número dentro de 'Apendice N'
+        contenido  = m.group(3)  # HTML interno
+
         idx = int(idx_str)
 
-        # 1) Prioridad absoluta: si está en BORRAR → se elimina
+        # 1) Prioridad: si está en BORRAR → se elimina
         if idx in borrar:
             continue
 
-        # 2) Si 'conservar' está vacío → conservar todos los que no estén en borrar
+        # 2) Si 'conservar' está vacío → conservar todo lo que no esté en borrar
         if not conservar:
-            nuevos_bloques.append((idx, contenido))
+            nuevos_bloques.append((idx, open_tag, contenido))
             continue
 
         # 3) Si 'conservar' NO está vacío → conservar solo esos índices
         if idx in conservar:
-            nuevos_bloques.append((idx, contenido))
+            nuevos_bloques.append((idx, open_tag, contenido))
 
-    # Si nada queda después del filtrado
     if not nuevos_bloques:
-        return ""  # o retorna texto, según tu política
+        return ""
 
-    # Reconstrucción del mensaje final
+    # Reconstrucción
     salida = []
     if renumerar:
-        for nuevo_idx, (_, contenido) in enumerate(nuevos_bloques, start=1):
-            salida.append(f'<div class="Apendice {nuevo_idx}">{contenido}</div>')
+        for nuevo_idx, (_, open_tag, contenido) in enumerate(nuevos_bloques, start=1):
+            # Cambiamos solo el número de 'Apendice N' en la clase, pero
+            # mantenemos id="..." y demás atributos igual.
+            new_open_tag = _actualizar_indice_apendice_en_tag(open_tag, nuevo_idx)
+            salida.append(f'{new_open_tag}{contenido}</section>')
     else:
-        for (idx, contenido) in nuevos_bloques:
-            salida.append(f'<div class="Apendice {idx}">{contenido}</div>')
+        # Mantenemos el tag original tal cual, incluyendo id e índice de apéndice
+        for idx, open_tag, contenido in nuevos_bloques:
+            salida.append(f'{open_tag}{contenido}</section>')
 
     return "\n\n".join(salida)
 
@@ -2009,7 +2036,7 @@ def extraer_titulos(texto: str):
     # - Captura cualquier texto interno
     # - Respeta saltos de línea
     patron = re.compile(
-        r'<span\s+class=["\']titulo["\'][^>]*>(.*?)</span>',
+        r'<h1\b[^>]*>(.*?)</h1>',
         re.I | re.S
     )
 
@@ -2074,7 +2101,7 @@ def aplicar_titulos_numerados(texto: str, titulos_numerados) -> str:
 
         # Reemplazo final:
         # Sustituimos TODO el <span class="titulo">...</span> por el nuevo número + título
-        reemplazo = f'<span class="titulo">{nuevo_titulo}</span>'
+        reemplazo = f'<h1>{nuevo_titulo}</h1>'
 
         reemplazos.append((start, end, reemplazo))
 
@@ -2086,10 +2113,11 @@ def aplicar_titulos_numerados(texto: str, titulos_numerados) -> str:
         out = out[:start] + rep + out[end:]
 
     return out
+from html import escape
 
 def generar_tabla_contenido(titulos_numerados) -> str:
     """
-    Construye un bloque de texto plano con la tabla de contenido.
+    Construye un bloque HTML con la tabla de contenido.
 
     Parámetro:
         titulos_numerados: lista de dicts con estructura:
@@ -2100,23 +2128,51 @@ def generar_tabla_contenido(titulos_numerados) -> str:
         }
 
     Retorno:
-        Texto plano con el encabezado 'Tabla de contenido' seguido por los títulos numerados.
+        HTML con la estructura:
+
+        <section class="toc">
+          <h1>Tabla de contenido</h1>
+          <ol>
+            <li>...</li>
+            ...
+          </ol>
+        </section>
     """
 
     if not isinstance(titulos_numerados, list):
         raise TypeError("titulos_numerados debe ser una lista de dicts.")
 
-    lineas = ["Tabla de contenido"]
-
+    # Extraer y limpiar títulos válidos
+    titulos_limpios = []
     for item in titulos_numerados:
         if not isinstance(item, dict):
             continue
 
         titulo = item.get("titulo")
         if isinstance(titulo, str) and titulo.strip():
-            lineas.append(titulo.strip())
+            titulos_limpios.append(titulo.strip())
 
-    return "\n".join(lineas)
+    # Si no hay títulos, opcional: devolver cadena vacía
+    if not titulos_limpios:
+        return ""
+
+    # Construir HTML
+    partes = [
+        '<section class="toc">',
+        '  <h1>Tabla de contenido</h1>',
+        '  <ol>',
+    ]
+
+    for titulo in titulos_limpios:
+        partes.append(f"    <li>{escape(titulo)}</li>")
+
+    partes.extend([
+        '  </ol>',
+        '</section>',
+    ])
+
+    return "\n".join(partes)
+
 
 def process_titulo_blocks(texto: str) -> str:
     """

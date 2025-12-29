@@ -79,8 +79,15 @@ def informe_final(
 
     # 1) PROCESAR CIE10 ----------------------------------
     import json
-    with open("src\Colmedicos\cie10.json", "r", encoding="utf-8") as f:
+    from pathlib import Path
+
+    BASE_DIR = Path(__file__).resolve().parent
+
+    cie10_path = BASE_DIR / "cie10.json"
+    with open(cie10_path, "r", encoding="utf-8") as f:
         maestro_cie10 = json.load(f)
+
+
     df_union = pd.DataFrame(maestro_cie10)
     if aplicar_cie10:
         t18 = time.perf_counter()
@@ -193,7 +200,7 @@ def informe_final(
             # Si tu process_plot_blocks acepta kwargs tipo "fast=True"/"dpi=96"/"tight=False", pásalos aquí:
             if modo_rapido_plots:
                 try:
-                    out_plot = process_plot_blocks(df_datos, text_for_next, fast=True, dpi=96, tight=False)
+                    out_plot = process_plot_blocks(df_datos, text_for_next)
                 except TypeError:
                     # si no acepta kwargs extra, llama normal
                     out_plot = process_plot_blocks(df_datos, text_for_next)

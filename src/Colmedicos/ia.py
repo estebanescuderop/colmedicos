@@ -11,6 +11,7 @@ import plotly.express as px
 from Colmedicos.registry import register
 from Colmedicos.config import OPENAI_API_KEY
 
+
 API_KEY = "API"
 API_KEY2 = "API"
 API_KEY3 = "API"
@@ -142,6 +143,8 @@ A. Detección del tipo de gráfica → (chart_type, function_name)
 
 “tabla”, “cuadro”, “listado” → ("tabla","graficar_tabla")
 Si no se especifica, asume barras.
+
+"piramide", "piramid", "piram" → ("piramide","graficar_piramide")
 
 B. Título (title)
 
@@ -313,7 +316,32 @@ L. El uso de add_total_row y add_total_column se realiza de la siguiente forma:
     - add_total_row se enviará como un parametro con valor true siempre y cuando se solicite de forma explicita que desea totalizar o desea totales de filas
     - add_total_column se enviará como un parametro con valor true siempre y cuando se solicite de forma explicita que desea totalizar o desea totales de columnas.
     - Cuando no se especifique de forma explicita la solicitud de totales, envia ambos parametros en false.
-    
+
+U. Reglas específicas para gráficas de pirámide:
+    - Cuando el usuario solicite una gráfica de pirámide poblacional (“piramide”, “pirámide poblacional”, “pyramidal”, “población por sexo”, “hombres y mujeres por edad”, etc.) aplica además las siguientes reglas:
+    - legend_col es obligatorio
+    - Identifica la columna categórica que divide la población (por ej. “sexo”, “género”, “hombre/mujer”).
+    - Si no se puede determinar con claridad, coloca "legend_col": null y marca "needs_disambiguation": true.
+    - legend_col debe tener exactamente 2 categorías
+    - Si la columna tiene más de dos categorías, o si no queda claro cuáles usar:
+        "needs_disambiguation": true
+    - Propón alternativas en "candidates".
+    - y debe ser numérico o un conteo de personas/registros
+    - Si el usuario menciona “personas”, “trabajadores”, “registros”, usa:
+          "agg": "distinct_count"
+          "distinct_on": "<col de identificación>" (ej: “documento”).
+          Si no se especifica nada: "agg": "count".
+    - xlabel debe ser la variable de clasificación por edades o grupos
+    - Si el usuario solicita “por edades”, “por rangos de edad”, “por décadas”, etc., genera automáticamente un binning adecuado y usa como xlabel el output_col.
+    - colors_by_category se usa para definir los colores de los dos lados
+        Ejemplo:
+          "colors_by_category": {
+          "Hombres": "#4a90e2",
+          "Mujeres": "#e94f37"
+          }
+    - show_legend debe ser true. A menos que se pida explícitamente ocultarla.
+    - sort debe ser null. Las pirámides no aplican ordenamiento automático; mantienen el orden natural de los rangos.
+
 
  ESQUEMA DE SALIDA (params)
  - Devolver exclusivamente los parametros indicados en este esquema, no devolver nada por fuera de esta estructura, no inventes columnas a menos que estén explicitamente indicadas en {COLUMNAS_JSON}.
@@ -986,21 +1014,6 @@ Reglas estrictas:
 - Recuerda que SIEMPRE los subtitulos son en minuscula, si no aparece así, tomalo como un titulo
 - No incluyas texto fuera del JSON.
 
-================================================================
-4. REGLA IMPORTANTE FINAL
-================================================================
-
-Para los titulos:
-  - INTRODUCCION
-  - MARCO LEGAL
-  - OBJETIVOS
-    - Objetivos general
-    - Objetivos especificos
-  - CARACTERISTICAS DE LA EMPRESA
-  - METODOLOGÍA
-  - MATERIALES Y MÉTODOS
-no generes un consecutivo, empieza a generar consecutivo a partir de los siguientes titulos y subtitulos posteriores a este.
-
 
 ================================================================
 5. INSTRUCCIÓN FINAL
@@ -1036,11 +1049,13 @@ def titulos_gpt5(texto):
 AG_APENDICES = """Eres un agente experto en estructuración y depuración de documentos técnicos en salud ocupacional.
 Tu única misión es analizar un texto completo que contiene uno o varios bloques en formato:
 
-<div class="Apendice N">
+<section class="Apendice N" id="ABCD">
     ...
-</div>
+</section>
 
 Cada bloque representa un APÉNDICE independiente.
+N es un número entero secuencial (1, 2, 3, ...).
+el id es el nombre único del apéndice (puede ser cualquier cadena).
 
 ================================================================
 1. OBJETIVO ÚNICO

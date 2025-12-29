@@ -459,91 +459,122 @@ Exposición Laboral
 #     f.write(out)
 
 variable = """{
-      "chart_type": "barras_horizontal",
-      "function_name": "graficar_barras_horizontal",
-      "title": "Personas por grupos etarios",
+      "chart_type": "piramide",
+      "function_name": "graficar_piramide",
+      "title": "Distribución poblacional por edad",
       "xlabel": "grupo_edad",
       "y": "documento",
       "agg": "distinct_count",
+
       "distinct_on": "documento",
       "drop_dupes_before_sum": false,
-      "unique_by": null,
-      "conditions_all": [],
+      "unique_by": ["documento"],
+
+      "conditions_all": [
+        ["documento", "!=", null]
+      ],
       "conditions_any": [],
+
       "binning": {
         "column": "edad",
-        "bins": [
-          "-inf",
-          6,
-          12,
-          19,
-          27,
-          60,
-          "+inf"
-        ],
-        "labels": [
-          "0-5",
-          "6-11",
-          "12-18",
-          "19-26",
-          "27-59",
-          "60+"
-        ],
+        "bins": ["-inf", 10, 20, 30, 40, 50, "+inf"],
+        "labels": ["0-10", "11-20", "21-30", "31-40", "41-50", "50+"],
         "output_col": "grupo_edad"
       },
+
       "stack_columns": null,
-      "color": null,
-      "colors_by_category": null,
+
       "legend_col": "genero",
+      "colors_by_category": {
+        "F": "#E94F37",
+        "M": "#4A90E2"
+      },
+
       "show_legend": true,
-      "show_values": null,
-      "sort": null,
+      "show_values": false,
+
+      "sort": {
+        "by": "grupo_edad",
+        "order": "asc"
+      },
+
       "limit_categories": null,
       "needs_disambiguation": false,
+
       "candidates": {
         "xlabel": [],
         "y": []
       },
-      "porcentage_of": null,
-      "percentage_colname": null
+
+      "percentage_of": null,
+      "percentage_colname": null,
+      "extra_measures": null,
+      "hide_main_measure": null,
+      "add_total_row": false,
+      "add_total_column": false
     }
  """
 
 variable2 = [{
-  "chart_type": "barras_horizontal",
-  "function_name": "graficar_barras_horizontal",
-  "title": "Tipo de riesgo",
-  "xlabel": "tipo_riesgo",
-  "y": "documento",
-  "agg": "distinct_count",
-  "distinct_on": "documento",
+      "chart_type": "piramide",
+      "function_name": "graficar_piramide",
+      "title": "Distribución poblacional por edad",
+      "xlabel": "grupo_edad",
+      "y": "documento",
+      "agg": "distinct_count",
 
-  "drop_dupes_before_sum": False,
-  "unique_by": None,
-  "conditions_all": [],
-  "conditions_any": [],
-  "binning": None,
-  "stack_columns": {
-    "columns": ["riesgo_ergonomico", "riesgo_quimico", "riesgo_psicosocial", "riesgo_biomecanico"],
-    "output_col": "tipo_riesgo",
-    "value_col": "valor",          # 👈 mejor que None
-    "keep_value": "si",
-    "label_map": None
-  },
-  "color": None,
-  "colors_by_category": None,      # o un dict si quieres colores por sexo
-  "show_legend": True,
-  "legend_col": "genero",
-  "show_values": False,
-  "sort": None,
-  "limit_categories": None,
-  "needs_disambiguation": False,
-  "candidates": {
-    "xlabel": [],
-    "y": []
-  }
-}
+      "distinct_on": "documento",
+      "drop_dupes_before_sum": False,
+      "unique_by": ["documento"],
+
+      "conditions_all": [
+        ["documento", "!=", None]
+      ],
+      "conditions_any": [],
+
+      "binning": {
+        "column": "edad",
+        "bins": ["-inf", 10, 20, 30, 40, 50, "+inf"],
+        "labels": ["0-10", "11-20", "21-30", "31-40", "41-50", "50+"],
+        "output_col": "grupo_edad"
+      },
+
+      "stack_columns": None,
+
+      "legend_col": "genero",
+      "colors_by_category": {
+        "F": "#E94F37",
+        "M": "#4A90E2"
+      },
+
+      "show_legend": True,
+      "show_values": False,
+
+      "sort": {
+        "by": "grupo_edad",
+        "order": "asc"
+      },
+
+      "limit_categories": None,
+      "needs_disambiguation": False,
+
+      "candidates": {
+        "xlabel": [],
+        "y": []
+      },
+
+      "percentage_of": None,
+      "percentage_colname": None,
+      "extra_measures": None,
+      "hide_main_measure": None,
+      "add_total_row": False,
+      "add_total_column": False
+    }
 ]
+
+#json_str = json.dumps(variable2, ensure_ascii=False, indent=2)
+# graficar = plot_from_params(df_datos,variable2[0])
+# print(graficar)
 
 
 # # out = _fig_to_data_uri(out)

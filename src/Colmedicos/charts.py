@@ -306,6 +306,62 @@ def _aggregate_frame(
         frames.append(s)
     out = pd.concat(frames, axis=1)
     return out
+def _aggregate_frame_chart(
+    *,
+    df: pd.DataFrame,
+    x: str,
+    y: str,
+    agg: str,
+    legend_col: str,
+    distinct_on=None,
+    drop_dupes_before_sum=False,
+    unique_by=None,
+):
+    """
+    Wrapper universal para adaptar _aggregate_frame
+    al ecosistema agentico (barras, torta, pirámide).
+    Siempre retorna:
+    - columna X
+    - columna y agregada
+    - columna legend_col (sin agregación)
+    """
+
+    # ============================
+    # Validación básica
+    # ============================
+    if x not in df.columns:
+        raise ValueError(f"La columna X '{x}' no existe en el dataframe")
+
+    if y not in df.columns:
+        raise ValueError(f"La columna y '{y}' no existe en el dataframe")
+
+    if legend_col not in df.columns:
+        raise ValueError(f"La columna legend_col '{legend_col}' no existe en el dataframe")
+
+    # ============================
+    # Ejecutar la agregación
+    # ============================
+    df_agg = _aggregate_frame(
+        df=df,
+        xlabel=x,
+        y_cols=[y],
+        agg=agg,
+        distinct_on=distinct_on,
+        drop_dupes_before_sum=drop_dupes_before_sum,
+    )
+
+    # _aggregate_frame devuelve index = x
+    df_agg = df_agg.reset_index()
+
+    # ============================
+    # Agregar la columna de categoría (legend_col)
+    # ============================
+    df_cat = df[[x, legend_col]].drop_duplicates()
+
+    df_agg = df_agg.merge(df_cat, on=x, how="left")
+
+    return df_agg
+
 
 def _apply_top_n_general(df: pd.DataFrame, label_col: str, top_n: int) -> pd.DataFrame:
     """
@@ -1394,6 +1450,262 @@ def graficar_tabla(
 
     return fig, ax
 
+def graficar_piramide(
+    df: pd.DataFrame,
+    xlabel: Optional[Union[str, List[str]]] = None,
+    y: Optional[Union[str, List[str]]] = None,
+    agg: Union[str, Dict[str, str]] = "count",
+    titulo: str = "Gráfico de Pirámide",
+    color: Optional[Union[str, List[str]]] = None,
+    *,
+    # Compatibilidad completa con plot_from_params
+    unique_by: Optional[Union[str, List[str]]] = None,
+    conditions_all: Optional[List[List[Any]]] = None,
+    conditions_any: Optional[List[Union[List[Any], List[List[Any]]]]] = None,
+    distinct_on: Optional[str] = None,
+    drop_dupes_before_sum: bool = False,
+    sort: Optional[Dict[str, str]] = None,
+    limit_categories: Optional[int] = None,
+    legend_col: Optional[str] = None,
+    colors_by_category: Optional[Dict[str, str]] = None,
+    show_legend: bool = True,
+    show_values: bool = True,
+    figsize: Tuple[float, float] = (9, 6),
+    **kwargs,
+) -> Tuple[plt.Figure, plt.Axes]:
+    """
+    Gráfico de pirámide poblacional compatible con plot_from_params.
+
+    Típico JSON desde plot_from_params:
+      {
+        "function_name": "graficar_piramide",
+        "xlabel": "grupo_edad",
+        "legend_col": "genero",
+        "y": "documento",
+        "agg": "distinct_count"   # o "count"
+      }
+    """
+
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError("El parámetro 'df' debe ser un DataFrame de pandas.")
+
+    # -----------------------------
+    # 1. Normalizar X (xlabel)
+    # -----------------------------
+    df2, xlabel_final, _ = _ensure_xlabel(df, xlabel)
+
+    if xlabel_final is None:
+        raise ValueError("Se requiere 'xlabel' para graficar la pirámide.")
+
+    # -----------------------------
+    # 2. Validar legend_col
+    # -----------------------------
+    if legend_col is None:
+        raise ValueError("Se requiere 'legend_col' para la pirámide poblacional.")
+
+    if legend_col not in df2.columns:
+        raise ValueError(f"La columna de leyenda '{legend_col}' no existe en el DataFrame.")
+
+    # -----------------------------
+    # 3. Determinar columna métrica (y_col)
+    # -----------------------------
+    if y is None:
+        # Si no especifican Y:
+        # - si hay numeric, usamos la primera
+        # - si hay distinct_on, usamos distinct_on
+        # - si no, creamos una columna de 1s para contar
+        num_cols = df2.select_dtypes(include=[np.number]).columns.tolist()
+        if num_cols:
+            y_col = num_cols[0]
+        elif distinct_on and distinct_on in df2.columns:
+            y_col = distinct_on
+        else:
+            y_col = "__ones__"
+            df2 = df2.copy()
+            df2[y_col] = 1
+    else:
+        if isinstance(y, list):
+            if not y:
+                raise ValueError("Lista 'y' vacía.")
+            y_col = y[0]
+        else:
+            y_col = y
+
+        if y_col not in df2.columns:
+            # Permitimos que _aggregate_frame use distinct_on si el agg es count/distinct_count
+            if not (isinstance(agg, str) and agg in ("count", "distinct_count") and distinct_on in df2.columns):
+                raise ValueError(f"La columna '{y_col}' no existe en el DataFrame.")
+
+    # -----------------------------
+    # 4. Filtro/deduplicación previa
+    # -----------------------------
+    dff = _prefilter_df(
+        df2,
+        unique_by=unique_by,
+        conditions_all=conditions_all,
+        conditions_any=conditions_any,
+    )
+
+    if dff.empty:
+        fig, ax = plt.subplots(figsize=figsize)
+        ax.axis("off")
+        msg = "No hay datos para graficar la pirámide (dataset vacío tras filtros)."
+        ax.text(0.5, 0.5, msg, ha="center", va="center", fontsize=14, weight="bold")
+        if titulo:
+            ax.set_title(titulo, fontsize=16, weight="bold", pad=20)
+        fig.tight_layout()
+        return fig, ax
+
+    # -----------------------------
+    # 5. Agregación: X + legend_col
+    # -----------------------------
+    df_agg = _aggregate_frame(
+        dff,
+        xlabel=[xlabel_final, legend_col],
+        y_cols=[y_col],
+        agg=agg,
+        distinct_on=distinct_on,
+        drop_dupes_before_sum=drop_dupes_before_sum,
+    )
+
+    if isinstance(df_agg, pd.Series):
+        df_agg = df_agg.to_frame(name=y_col)
+
+    df_agg_reset = df_agg.reset_index()
+
+    if df_agg_reset.empty:
+        fig, ax = plt.subplots(figsize=figsize)
+        ax.axis("off")
+        msg = "No hay datos agregados para construir la pirámide."
+        ax.text(0.5, 0.5, msg, ha="center", va="center", fontsize=14, weight="bold")
+        if titulo:
+            ax.set_title(titulo, fontsize=16, weight="bold", pad=20)
+        fig.tight_layout()
+        return fig, ax
+
+    # -----------------------------
+    # 6. Identificar columna de valores
+    # -----------------------------
+    id_cols = [xlabel_final, legend_col]
+    value_cols = [c for c in df_agg_reset.columns if c not in id_cols]
+    if not value_cols:
+        fig, ax = plt.subplots(figsize=figsize)
+        ax.axis("off")
+        msg = "No se encontró ninguna columna de valores para la pirámide."
+        ax.text(0.5, 0.5, msg, ha="center", va="center", fontsize=14, weight="bold")
+        if titulo:
+            ax.set_title(titulo, fontsize=16, weight="bold", pad=20)
+        fig.tight_layout()
+        return fig, ax
+
+    value_col = value_cols[0]
+
+    # -----------------------------
+    # 7. Pivot: filas = grupos, columnas = categorías (2)
+    # -----------------------------
+    pivot = df_agg_reset.pivot(
+        index=xlabel_final,
+        columns=legend_col,
+        values=value_col
+    ).fillna(0)
+
+    # Si el pivot quedó completamente vacío
+    if pivot.empty or pivot.shape[1] == 0:
+        fig, ax = plt.subplots(figsize=figsize)
+        ax.axis("off")
+        msg = (
+            f"No hay datos para construir la pirámide "
+            f"(pivot vacío para xlabel='{xlabel_final}' y legend_col='{legend_col}')."
+        )
+        ax.text(0.5, 0.5, msg, ha="center", va="center", fontsize=14, weight="bold")
+        if titulo:
+            ax.set_title(titulo, fontsize=16, weight="bold", pad=20)
+        fig.tight_layout()
+        return fig, ax
+
+    # -----------------------------
+    # 8. SORT y TOP-N
+    #   - Si el usuario NO manda sort, ordenamos por total de mayor a menor
+    # -----------------------------
+    if sort:
+        by = sort.get("by", "y")
+        order = sort.get("order", "asc")
+        ascending = (order == "asc")
+
+        if by == "label":
+            pivot = pivot.sort_index(ascending=ascending)
+        else:
+            row_sum = pivot.sum(axis=1)
+            pivot = pivot.loc[row_sum.sort_values(ascending=ascending).index]
+    else:
+        # Orden por total de cada grupo (mayor a menor) por defecto
+        row_sum = pivot.sum(axis=1)
+        pivot = pivot.loc[row_sum.sort_values(ascending=False).index]
+
+    if limit_categories and limit_categories > 0:
+        pivot = pivot.head(limit_categories)
+
+    categorias = pivot.index.tolist()
+    columnas = list(pivot.columns)
+
+    if len(columnas) != 2:
+        raise ValueError(
+            f"La pirámide requiere EXACTAMENTE 2 categorías en '{legend_col}'. "
+            f"Encontradas: {columnas}"
+        )
+
+    izquierda, derecha = columnas
+
+    vals_izq = -pivot[izquierda].astype(float).values  # lado izquierdo (negativos)
+    vals_der = pivot[derecha].astype(float).values     # lado derecho (positivos)
+
+    # -----------------------------
+    # 9. Colores
+    # -----------------------------
+    DEFAULT = ["#4A90E2", "#E94F37"]
+
+    if colors_by_category:
+        color_izq = colors_by_category.get(str(izquierda), DEFAULT[0])
+        color_der = colors_by_category.get(str(derecha), DEFAULT[1])
+    elif isinstance(color, list) and len(color) >= 2:
+        color_izq, color_der = color[0], color[1]
+    elif isinstance(color, str):
+        color_izq, color_der = color, DEFAULT[1]
+    else:
+        color_izq, color_der = DEFAULT
+
+    # -----------------------------
+    # 10. Figura
+    # -----------------------------
+    fig, ax = plt.subplots(figsize=figsize)
+
+    ax.barh(categorias, vals_izq, label=str(izquierda), color=color_izq)
+    ax.barh(categorias, vals_der, label=str(derecha), color=color_der)
+
+    if show_values:
+        for i, v in enumerate(vals_izq):
+            ax.text(v, i, f"{abs(v):,.0f}", va="center", ha="right", fontsize=8)
+        for i, v in enumerate(vals_der):
+            ax.text(v, i, f"{v:,.0f}", va="center", ha="left", fontsize=8)
+
+    ax.axvline(0, color="gray", linewidth=1.2)
+    ax.grid(axis="x", linestyle="--", color="#CCCCCC", alpha=0.6)
+
+    ax.set_xlabel("Población")
+    ax.set_ylabel(xlabel_final)
+
+    if titulo:
+        ax.set_title(titulo, fontsize=16, weight="bold")
+
+    # -----------------------------
+    # 11. Leyenda siempre que show_legend=True
+    # -----------------------------
+    if show_legend:
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.12), ncol=2)
+
+    fig.tight_layout()
+    return fig, ax
+
 
 
 
@@ -1568,7 +1880,7 @@ def _finalize_layout(fig, ax, *, legend_outside=True):
     plt.tight_layout()
 
 
-@register("plt_from_params")
+
 
 @register("plt_from_params")
 def plot_from_params(df: pd.DataFrame, params: Dict[str, Any], *, show: bool = False) -> Tuple[plt.Figure, plt.Axes]:
@@ -1600,6 +1912,7 @@ def plot_from_params(df: pd.DataFrame, params: Dict[str, Any], *, show: bool = F
         "graficar_barras_horizontal": graficar_barras_horizontal,
         "graficar_torta": graficar_torta,
         "graficar_tabla": graficar_tabla,
+        "graficar_piramide": graficar_piramide,
 
         # alias
         "barras": graficar_barras,
@@ -1617,6 +1930,9 @@ def plot_from_params(df: pd.DataFrame, params: Dict[str, Any], *, show: bool = F
 
         "tabla": graficar_tabla,
         "table": graficar_tabla,
+
+        "piramide": graficar_piramide,
+        "piram": graficar_piramide,
     }
 
     func = DISPATCH.get(fn_key)
@@ -1802,11 +2118,11 @@ def plot_from_params(df: pd.DataFrame, params: Dict[str, Any], *, show: bool = F
         common_kwargs["add_total_column"] = add_total_column
 
     # ---- Config específica de BARRAS / HORIZONTAL ----
-    if func in (graficar_barras, graficar_barras_horizontal):
+    if func.__name__ in ("graficar_barras", "graficar_barras_horizontal", "graficar_piramide"):
         legend_col = p.get("legend_col")
-        colors_by_category = p.get("colors_by_category")
         if legend_col is not None:
             common_kwargs["legend_col"] = legend_col
+        colors_by_category = p.get("colors_by_category")
         if colors_by_category is not None:
             common_kwargs["colors_by_category"] = colors_by_category
         if sort is not None:
@@ -1849,6 +2165,8 @@ def plot_from_params(df: pd.DataFrame, params: Dict[str, Any], *, show: bool = F
             t = "torta"
         elif ct in ("tabla", "table", "graficar_tabla"):
             t = "tabla"
+        elif ct in ("piramide", "graficar_piramide", "piram"):
+            t = "piramide"
 
     if t in ("barras", "bar", "column", "col"):
         _wrap_shorten_ticks(
@@ -1878,6 +2196,18 @@ def plot_from_params(df: pd.DataFrame, params: Dict[str, Any], *, show: bool = F
             wrap_width=pie_wrap_w,
         )
         _apply_pie_texts(ax, labels_fmt)
+    
+    elif t in ("piramide", "piram"):
+        _wrap_shorten_ticks(
+            ax,
+            axis="x",
+            wrap_width=wrap_width_x,
+            max_chars=max_chars_x,
+            fontsize=tick_fontsize,
+            rotation=rotation,
+        )
+
+
 
     _finalize_layout(fig, ax, legend_outside=legend_out)
 
