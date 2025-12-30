@@ -1689,14 +1689,14 @@ def procesar_codigos_cie10(
     Retorna:
         DataFrame transformado con 1 fila por código CIE10 encontrado.
     """
-
+    
     # --- 1. Función interna para extraer códigos ---
     def extraer_codigos(texto):
         if pd.isna(texto):
             return []
         
         texto = str(texto)
-
+        texto = re.sub(r"\|{2,}", "|", texto)
         # Busca patrones tipo CIE10|J45:
         codigos = re.findall(r"CIE10\|([A-Z0-9]+)\s*:", texto)
 

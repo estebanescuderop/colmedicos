@@ -11,7 +11,6 @@ import plotly.express as px
 from Colmedicos.registry import register
 from Colmedicos.config import OPENAI_API_KEY
 
-
 API_KEY = "API"
 API_KEY2 = "API"
 API_KEY3 = "API"
@@ -491,7 +490,94 @@ Salida:
       "porcentage_of": null,
       "percentage_colname": null
     }
-    
+
+Ejemplo 3:
+Entrada:
+ #Gráfica de tablas llamada 'Pruebas hepaticas' con conteo unico de personas por documento con x label de la columna Pruebas, filtrando en la columna Tipo de Prueba = Perfil Hepatico  y agregando en leyenda el resultado#
+
+Salida:
+{
+      "chart_type": "tabla",
+      "function_name": "graficar_tabla",
+      "title": "Pruebas hepaticas",
+      "xlabel": "Prueba",
+      "y": "documento",
+      "agg": "distinct_count",
+      "distinct_on": "documento",
+      "drop_dupes_before_sum": false,
+      "unique_by": null,
+      "conditions_all": [
+        ["Tipo prueba", "==", "Perfil Hepatico"]
+      ],
+      "conditions_any": [],
+      "binning": null,
+      "stack_columns": null,
+      "color": null,
+      "colors_by_category": null,
+      "legend_col": "Resultado",
+      "show_legend": true,
+      "show_values": null,
+      "sort": null,
+      "limit_categories": null,
+      "needs_disambiguation": false,
+      "candidates": {
+        "xlabel": [],
+        "y": []
+      },
+      "percentage_of": null,
+      "percentage_colname": null,
+      "extra_measures": null,
+      "hide_main_measure": null,
+      "add_total_row": false,
+      "add_total_column": false
+    }    
+
+Ejemplo 4:
+
+Entrada:
+  #Gráfica de barras horizontales llamada 'Pruebas infecciosas' con conteo unico de personas por documento filtrando en la columna Tipo de Prueba todos los valores que inicien por 'Pruebas infecciosas' con xlabel de la columna Pruebas y agregando leyenda el resultado#
+
+Salida:
+{
+      "chart_type": "barras_horizontal",
+      "function_name": "graficar_barras_horizontal",
+      "title": "Pruebas infecciosas",
+      "xlabel": "Prueba",
+      "y": "documento",
+      "agg": "distinct_count",
+      "distinct_on": "documento",
+      "drop_dupes_before_sum": false,
+      "unique_by": null,
+      "conditions_all": [
+        ["Tipo prueba", "startswith", "Pruebas infecciosas"]
+      ],
+      "conditions_any": [],
+      "binning": null,
+      "stack_columns": null,
+      "color": null,
+      "colors_by_category": null,
+      "legend_col": "Resultado",
+      "show_legend": true,
+      "show_values": null,
+      "sort": null,
+      "limit_categories": null,
+      "needs_disambiguation": false,
+      "candidates": {
+        "xlabel": [],
+        "y": []
+      },
+      "percentage_of": null,
+      "percentage_colname": null,
+      "extra_measures": null,
+      "hide_main_measure": null,
+      "add_total_row": false,
+      "add_total_column": false
+    }    
+
+NOTAS FINALES
+- Utiliza los ejemplos como guía, y si te llegan instrucciones similares, sigue el mismo patrón.
+- No agregues ni omitas ningún campo del esquema.
+
 Si hubiera varias instrucciones:
 
 [
