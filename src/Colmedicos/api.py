@@ -141,7 +141,7 @@ def informe_final(
     try:
         # 1) Render de variables
         t1 = time.perf_counter()
-        texto_completo = columnas_a_texto(df, "Titulo", "Contenido")  # asumes que ya existe
+        texto_completo = columnas_a_texto(df, "Titulo", "Contenido", "level")  # asumes que ya existe
         text = _render_vars_text(texto_completo, ctx=ctx, strict=False)
         meta_detalle["len_texto_render"] = len(text)
         logs.append("Render de variables: OK")

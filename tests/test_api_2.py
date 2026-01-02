@@ -12,7 +12,7 @@ otra_ruta = r"C:\Users\EstebanEscuderoPuert\Downloads\muestra_plantilla.xlsx"
 # Ruta del archivo Excel
 ruta_archivo = r"C:\Users\EstebanEscuderoPuert\Downloads\Plantilla.xlsx"
 # Lee el archivo Excel (por defecto lee la primera hoja)
-df = pd.read_excel(otra_ruta)
+df = pd.read_excel(ruta_archivo)
 
 ctx = {
     "nombre_cliente": "TCC S.A.S.",

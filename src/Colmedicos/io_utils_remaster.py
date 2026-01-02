@@ -1501,42 +1501,118 @@ import unicodedata
 import pandas as pd
 
 
+# def columnas_a_texto(
+#     df: pd.DataFrame,
+#     col1: str,
+#     col2: str,
+#     *,
+#     sep: str = "\n\n",
+#     dropna: bool = True,
+#     strip: bool = True
+# ) -> str:
+#     """
+#     Toma dos columnas (col1 = título, col2 = contenido) y genera un HTML donde
+#     cada fila se convierte en un apéndice:
+
+#         <section class="toc Apendice N" id="apendice-N-slug-del-titulo">
+#             <h1>TÍTULO</h1>
+#             ...contenido...
+#         </section>
+
+#     - N empieza en 1.
+#     - El id se construye a partir del título normalizado.
+#     """
+
+#     # --- Validaciones de columnas ---
+#     for c in (col1, col2):
+#         if c not in df.columns:
+#             raise ValueError(f"La columna '{c}' no existe en el DataFrame.")
+
+#     # --- Helper interno para generar slugs a partir del título ---
+#     def _slugify(text: str) -> str:
+#         if text is None:
+#             return "apendice"
+#         s = str(text)
+#         # Normalizar tildes
+#         s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
+#         s = s.lower()
+#         # Reemplazar todo lo que no sea alfanumérico por guiones
+#         s = re.sub(r"[^a-z0-9]+", "-", s)
+#         s = s.strip("-")
+#         return s or "apendice"
+
+#     bloques: list[str] = []
+#     apendice_idx = 1
+
+#     # --- Procesar fila por fila ---
+#     for a, b in df[[col1, col2]].itertuples(index=False, name=None):
+#         partes: list[str] = []
+#         titulo_plano: str | None = None  # para usar en el id
+
+#         for idx, v in enumerate((a, b)):
+#             if v is None or (isinstance(v, float) and pd.isna(v)):
+#                 if dropna:
+#                     continue
+#                 v = ""
+
+#             s = str(v)
+#             if strip:
+#                 s = s.strip()
+
+#             # col1 → Título (primer valor)
+#             if idx == 0:
+#                 titulo_plano = s
+#                 s = f"<h1>{s}</h1>"
+
+#             partes.append(s)
+
+#         # Construir el bloque del apéndice solo si tiene contenido
+#         if partes:
+#             slug = _slugify(titulo_plano)
+#             id_attr = f"apendice-{apendice_idx}-{slug}"
+
+#             # Mantiene la numeración en la clase, añade 'toc' y el id
+#             bloque = (
+#                 f'<section class="Apendice {apendice_idx}" id="{id_attr}">'
+#                 + sep.join(partes)
+#                 + "</section>"
+#             )
+#             bloques.append(bloque)
+#             apendice_idx += 1
+
+#     return sep.join(bloques)
+
 def columnas_a_texto(
     df: pd.DataFrame,
-    col1: str,
-    col2: str,
+    col1: str,        # título
+    col2: str,        # contenido
+    col_level: str,   # nivel del título (1–4)
     *,
     sep: str = "\n\n",
     dropna: bool = True,
     strip: bool = True
 ) -> str:
     """
-    Toma dos columnas (col1 = título, col2 = contenido) y genera un HTML donde
-    cada fila se convierte en un apéndice:
+    Toma tres columnas:
+      - col1: título
+      - col2: contenido
+      - col_level: nivel del título (1,2,3,4)
 
-        <section class="toc Apendice N" id="apendice-N-slug-del-titulo">
-            <h1>TÍTULO</h1>
-            ...contenido...
-        </section>
-
-    - N empieza en 1.
-    - El id se construye a partir del título normalizado.
+    y genera HTML con encabezados dinámicos (<h1>–<h4>).
     """
 
     # --- Validaciones de columnas ---
-    for c in (col1, col2):
+    for c in (col1, col2, col_level):
         if c not in df.columns:
             raise ValueError(f"La columna '{c}' no existe en el DataFrame.")
 
-    # --- Helper interno para generar slugs a partir del título ---
+    # --- Helper interno para generar slugs ---
     def _slugify(text: str) -> str:
         if text is None:
             return "apendice"
         s = str(text)
-        # Normalizar tildes
         s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
         s = s.lower()
-        # Reemplazar todo lo que no sea alfanumérico por guiones
         s = re.sub(r"[^a-z0-9]+", "-", s)
         s = s.strip("-")
         return s or "apendice"
@@ -1545,42 +1621,57 @@ def columnas_a_texto(
     apendice_idx = 1
 
     # --- Procesar fila por fila ---
-    for a, b in df[[col1, col2]].itertuples(index=False, name=None):
+    for titulo, contenido, level_raw in df[[col1, col2, col_level]].itertuples(index=False, name=None):
         partes: list[str] = []
-        titulo_plano: str | None = None  # para usar en el id
 
-        for idx, v in enumerate((a, b)):
-            if v is None or (isinstance(v, float) and pd.isna(v)):
-                if dropna:
-                    continue
-                v = ""
+        # --- Normalizar nivel ---
+        try:
+            level = int(level_raw)
+        except Exception:
+            level = 1
 
-            s = str(v)
-            if strip:
-                s = s.strip()
+        if level not in (1, 2, 3, 4):
+            level = 1
 
-            # col1 → Título (primer valor)
-            if idx == 0:
-                titulo_plano = s
-                s = f"<h1>{s}</h1>"
+        h_tag = f"h{level}"
 
-            partes.append(s)
+        # --- Título ---
+        if titulo is None or (isinstance(titulo, float) and pd.isna(titulo)):
+            if dropna:
+                continue
+            titulo_str = ""
+        else:
+            titulo_str = str(titulo).strip() if strip else str(titulo)
 
-        # Construir el bloque del apéndice solo si tiene contenido
-        if partes:
-            slug = _slugify(titulo_plano)
-            id_attr = f"apendice-{apendice_idx}-{slug}"
+        slug = _slugify(titulo_str)
+        id_attr = f"apendice-{apendice_idx}-{slug}"
 
-            # Mantiene la numeración en la clase, añade 'toc' y el id
-            bloque = (
-                f'<section class="Apendice {apendice_idx}" id="{id_attr}">'
-                + sep.join(partes)
-                + "</section>"
-            )
-            bloques.append(bloque)
-            apendice_idx += 1
+        partes.append(
+            f'<{h_tag} class="titulo-apendice title-level-{level}">'
+            f'{titulo_str}'
+            f'</{h_tag}>'
+        )
+
+        # --- Contenido ---
+        if contenido is not None and not (isinstance(contenido, float) and pd.isna(contenido)):
+            cont_str = str(contenido).strip() if strip else str(contenido)
+            partes.append(cont_str)
+        elif not dropna:
+            partes.append("")
+
+        # --- Construir bloque ---
+        bloque = (
+            f'<section class="Apendice {apendice_idx}" id="{id_attr}">'
+            + sep.join(partes)
+            + "</section>"
+        )
+
+        bloques.append(bloque)
+        apendice_idx += 1
 
     return sep.join(bloques)
+
+
 
 
 def limpieza_final(texto: str) -> str:
@@ -2017,36 +2108,38 @@ def procesar_apendices(texto: str, *, renumerar=True) -> str:
 @register("extraer_titulos")
 def extraer_titulos(texto: str):
     """
-    Extrae todos los títulos del tipo:
-        <span class="titulo">TEXTO</span>
+    Extrae todos los títulos HTML <h1> a <h4>.
 
-    Devuelve una lista de dicts:
+    Devuelve:
     [
         {
             "idx": 1,
-            "titulo": "INTRODUCCIÓN",
+            "titulo": "Introducción",
+            "level": 1,
+            "tag": "h1",
             "span": (start, end)
         },
         ...
     ]
     """
 
-    # Patrón robusto:
-    # - Acepta otros atributos dentro del span
-    # - Captura cualquier texto interno
-    # - Respeta saltos de línea
     patron = re.compile(
-        r'<h1\b[^>]*>(.*?)</h1>',
+        r'<(h[1-4])\b[^>]*>(.*?)</\1>',
         re.I | re.S
     )
 
     bloques = []
 
     for i, match in enumerate(patron.finditer(texto), start=1):
-        titulo = match.group(1).strip()
+        tag = match.group(1).lower()      # h1, h2, h3, h4
+        level = int(tag[1])               # 1,2,3,4
+        titulo = match.group(2).strip()
+
         bloques.append({
             "idx": i,
             "titulo": titulo,
+            "level": level,
+            "tag": tag,
             "span": match.span()
         })
 
@@ -2055,35 +2148,23 @@ def extraer_titulos(texto: str):
 
 def aplicar_titulos_numerados(texto: str, titulos_numerados) -> str:
     """
-    Reemplaza en `texto` cada <span class="titulo">...</span> por su versión numerada.
-
-    titulos_numerados:
-        Lista de diccionarios con estructura:
-        {
-            "idx": N,
-            "titulo": "1.2 Perfil hematológico",  # título ya numerado
-            "span": [start, end]                 # span del título original en el HTML
-        }
-
-    Funciona igual que aplicar_operaciones_en_texto:
-    - Aplica reemplazos de derecha a izquierda.
-    - Preserva la integridad del HTML.
-    - Acepta spans tipo lista o diccionario.
+    Reemplaza títulos <h1>-<h4> por versiones numeradas,
+    respetando el nivel original.
     """
 
     reemplazos = []
 
     for item in titulos_numerados:
-        # Validar estructura mínima
         if not isinstance(item, dict):
             continue
 
-        idx = item.get("idx")
         nuevo_titulo = item.get("titulo")
+        level = item.get("level")
         span_obj = item.get("span")
 
-        # Validación de título
-        if not isinstance(nuevo_titulo, str) or not nuevo_titulo.strip():
+        if not nuevo_titulo or not isinstance(level, int):
+            continue
+        if level not in (1, 2, 3, 4):
             continue
 
         # Normalizar span
@@ -2096,23 +2177,28 @@ def aplicar_titulos_numerados(texto: str, titulos_numerados) -> str:
             continue
 
         start, end = span_list
-        if not (isinstance(start, int) and isinstance(end, int) and 0 <= start <= end <= len(texto)):
+        if not (0 <= start <= end <= len(texto)):
             continue
 
-        # Reemplazo final:
-        # Sustituimos TODO el <span class="titulo">...</span> por el nuevo número + título
-        reemplazo = f'<h1>{nuevo_titulo}</h1>'
+        tag = f"h{level}"
+
+        reemplazo = (
+            f'<{tag} class="titulo-apendice title-level-{level}">'
+            f'{nuevo_titulo}'
+            f'</{tag}>'
+        )
 
         reemplazos.append((start, end, reemplazo))
 
-    # Aplicar reemplazos de derecha a izquierda para NO dañar offsets
-    reemplazos.sort(key=lambda t: t[0], reverse=True)
+    # ⚠️ Muy importante: derecha a izquierda
+    reemplazos.sort(key=lambda x: x[0], reverse=True)
 
     out = texto
     for start, end, rep in reemplazos:
         out = out[:start] + rep + out[end:]
 
     return out
+
 from html import escape
 
 def generar_tabla_contenido(titulos_numerados) -> str:

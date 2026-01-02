@@ -1022,6 +1022,8 @@ con esta forma:
   {
     "idx": N,
     "titulo": "TEXTO EXACTO DEL TÍTULO",
+    "level": X,
+    "tag": "h1|h2|h3|h4",
     "span": [inicio, fin]
   },
   ...
@@ -1034,19 +1036,27 @@ sin agregar explicaciones ni texto adicional.
 1. CLASIFICACIÓN OBLIGATORIA DE NIVELES
 ================================================================
 
-Debes clasificar cada elemento como NIVEL 1 o NIVEL 2 usando EXACTAMENTE estas reglas:
+Debes clasificar cada elemento como NIVEL 1, NIVEL 2, NIVEL 3 o NIVEL 4 usando EXACTAMENTE estas reglas:
 
 NIVEL 1
-- El texto del título está en MAYÚSCULAS COMPLETAS, o
-- Es el primer título del arreglo.
-
+- Se denota porque de acuerdo con el nivel del parametro "level" es 1
+- o porque el texto del título está completamente en mayúsculas.
 NIVEL 2
-- El texto está en minúsculas, mayúscula inicial o mezcla,
-  y aparece después de un NIVEL 1.
+- se denota porque de acuerdo con el nivel del parametro "level" es 2
+- o porque el texto del título NO está completamente en mayúsculas.
+
+NIVEL 3
+- se denota porque de acuerdo con el nivel del parametro "level" es 3
+- o porque el texto viene dentro de una estructura de subtítulo (ejemplo: <h3>)
+
+NIVEL 4
+- se denota porque de acuerdo con el nivel del parametro "level" es 4
+- o porque el texto viene dentro de una estructura de subtítulo (ejemplo: <h4>)
+
 
 Reglas rígidas:
-- Un título completamente en mayúsculas siempre será → NIVEL 1.
-- Un título que NO está completamente en mayúsculas → NIVEL 2.
+- Un título con un parametro level 1 siempre será → NIVEL 1.
+- Un título con parametro level 2 siempre será → NIVEL 2.
 - Los subtítulos pertenecen SIEMPRE al último título NIVEL 1 detectado.
 - No existen niveles 3 ni superiores.
 
@@ -1074,6 +1084,7 @@ Debes devolver EXCLUSIVAMENTE un arreglo JSON donde cada elemento tiene esta for
 {
   "idx": N,
   "titulo": "NUMERACIÓN + ESPACIO + TÍTULO EXACTO",
+  "level": 1 | 2 | 3 | 4,
   "span": [inicio, fin]
 }
 
@@ -1083,11 +1094,13 @@ Ejemplo de salida válida:
   {
     "idx": 1,
     "titulo": "1 INTRODUCCIÓN",
+    "level": 1,
     "span": [123, 150]
   },
   {
     "idx": 2,
     "titulo": "1.1 antecedentes",
+    "level": 2,
     "span": [151, 178]
   }
 ]
@@ -1097,7 +1110,7 @@ Reglas estrictas:
 - No agregues explicaciones.
 - No cambies los valores de span.
 - No modifiques el texto del título original.
-- Recuerda que SIEMPRE los subtitulos son en minuscula, si no aparece así, tomalo como un titulo
+- Recuerda que SIEMPRE son los que tienen un level diferente de 1, si no aparece así, tomalo como un titulo
 - No incluyas texto fuera del JSON.
 
 
