@@ -2,7 +2,7 @@
 from Colmedicos.ia import ask_gpt5
 from Colmedicos.io_utils import generar_output, aplicar_data_por_tipo_desde_output, aplicar_ia_por_tipo, aplicar_plot_por_tipo_desde_output, exportar_output_a_html, mostrar_html, limpiar_output_dataframe
 from Colmedicos.registry import register
-from Colmedicos.io_utils_remaster import process_ia_blocks, process_data_blocks, process_plot_blocks, _render_vars_text, exportar_output_a_html, _fig_to_data_uri, _format_result_plain, columnas_a_texto,aplicar_multiples_columnas_gpt5, limpieza_final,  unpivot_df, dividir_columna_en_dos, procesar_codigos_cie10, unir_dataframes, expand_json_column, procesar_apendices, process_titulo_blocks, remover_contenedores_apendice
+from Colmedicos.io_utils_remaster import process_ia_blocks, process_data_blocks, process_plot_blocks, _render_vars_text, exportar_output_a_html, _fig_to_data_uri, _format_result_plain, columnas_a_texto,aplicar_multiples_columnas_gpt5, limpieza_final,  unpivot_df, dividir_columna_en_dos, procesar_codigos_cie10, unir_dataframes, expand_json_column, procesar_apendices, process_titulo_blocks, remover_contenedores_apendice, reemplazar_textos, crear_resultado_agregado
 import pandas as pd
 
 # Colmedicos/api.py
@@ -74,6 +74,44 @@ def informe_final(
             fields_to_extract=campos_a_extraer,
             rename_map=renombrar_campos
         )
+
+        reglas_por_tipo = {
+            "Hemograma": {
+                "Alterado": ["Alterado", "Positivo"],
+                "Normal": ["Normal", "No Aplicado"]
+            },
+            "Perfil Hepatico": {
+                "Alterado": ["Alterado", "Positivo"],
+                "Normal": ["Normal", "No Aplicado"]
+            },
+            "Perfil Metabolico": {
+                "Alterado": ["Alterado", "Positivo"],
+                "Normal": ["Normal", "No Aplicado"]
+            },
+            "Perfil Renal": {
+                "Alterado": ["Alterado", "Positivo"],
+                "Normal": ["Normal", "No Aplicado"]
+            },
+            "Pruebas infeccionsas Frotis de uñas": {
+                "Alterado": ["Alterado", "Positivo"],
+                "Normal": ["Normal", "No Aplicado"]
+            },
+            "Pruebas Infecciosas Coprologico": {
+                "Alterado": ["Alterado", "Positivo"],
+                "Normal": ["Normal", "No Aplicado"]
+            },
+            "Pruebas infecciosas frotis faringueo": {
+                "Alterado": ["Alterado", "Positivo"],
+                "Normal": ["Normal", "No Aplicado"]
+            },
+            "Alcohol y sustancias psicoactivas": {
+                "Positivo": ["Alterado", "Positivo"],
+                "Negativo(a)": ["Negativo(a)", "No Aplicado", "Normal"]
+        }
+        }
+        
+        df_out = reemplazar_textos(df_out, "Resultado", {"Anormal": "Alterado", "alterado":"Alterado", "Aplicada": "Normal", "No Detectable": "Normal", "Positivo": "Alterado", "No patológico": "Normal", "null": "No Aplicado", "Alterado (alto)": "Alterado", "Alterado (bajo)": "Alterado", "Negativo(a)": "Normal"}, rellenar_vacios_con="No Aplicado")
+        df_out = crear_resultado_agregado(df=df_out, col_documento="documento", col_tipo_prueba="Tipo prueba", col_resultado="Resultado", nueva_columna="Resultado_Global", reglas_por_tipo=reglas_por_tipo)
         meta_detalle["t_expansion_json"] = round(time.perf_counter() - t15, 4)
         print("✔ Expansión de columna JSON aplicada")
 

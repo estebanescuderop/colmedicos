@@ -11,6 +11,7 @@ import plotly.express as px
 from Colmedicos.registry import register
 from Colmedicos.config import OPENAI_API_KEY
 
+
 API_KEY = "API"
 API_KEY2 = "API"
 API_KEY3 = "API"
@@ -575,7 +576,7 @@ Salida:
     }    
 
 NOTAS FINALES
-- Utiliza los ejemplos como guía, y si te llegan instrucciones similares, sigue el mismo patrón.
+- Utiliza los ejemplos como guía, y si te llegan instrucciones similares relacionados con los nombres clave, utiliza como referencia la estructura json del ejemplo.
 - No agregues ni omitas ningún campo del esquema.
 
 Si hubiera varias instrucciones:

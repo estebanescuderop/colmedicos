@@ -34,7 +34,7 @@ _OPS = {
 
     # 🔥 NUEVOS OPERADORES PARA TEXTO
     "contains": lambda a, b: a.astype(str).str.contains(b, case=False, na=False),
-    "startswith": lambda a, b: a.astype(str).str.startswith(b, na=False),
+    "startswith": lambda a, b: (a.astype(str).str.lower().str.startswith(str(b).lower(), na=False)),
     "endswith": lambda a, b: a.astype(str).str.endswith(b, na=False),
 
     # LIKE estilo SQL
@@ -1104,6 +1104,32 @@ def graficar_barras_horizontal(
     fig.tight_layout()
     return fig, ax
 
+def _wrap_shorten_table(
+    df: pd.DataFrame,
+    *,
+    wrap_width: int = 25,
+    max_chars: int = 120,
+    exclude_cols: list[str] | None = None
+) -> pd.DataFrame:
+    """
+    Envuelve texto largo en celdas de una tabla usando saltos de línea.
+    Aplica SOLO a columnas no numéricas.
+    """
+    exclude_cols = set(exclude_cols or [])
+    out = df.copy()
+
+    for col in out.columns:
+        if col in exclude_cols:
+            continue
+
+        # Solo texto
+        if not is_numeric_dtype(out[col]):
+            out[col] = out[col].apply(
+                lambda x: _wrap_shorten(x, max_chars=max_chars, wrap_width=wrap_width)
+            )
+
+    return out
+
 def graficar_tabla(
     df: pd.DataFrame,
     xlabel: Optional[Union[str, List[str]]] = None,
@@ -1396,22 +1422,95 @@ def graficar_tabla(
         )
         return fig, ax
 
+    # === Envolver y acortar textos largos en celdas ===
+    wrap_width_table = 30
+    max_chars_table = 150
+    df_formatted = _wrap_shorten_table(
+        df_formatted,
+        wrap_width=wrap_width_table,
+        max_chars=max_chars_table,
+    )
+    
+    from textwrap import fill
+    col_labels = [fill(str(c), width=18) for c in df_formatted.columns.tolist()] 
     # Crear la tabla principal
     tabla = ax.table(
         cellText=df_formatted.values.tolist(),
-        colLabels=df_formatted.columns.tolist(),
+        colLabels= col_labels,       #df_formatted.columns.tolist(),
         cellLoc="center",
         loc="center",
-        colWidths=[0.28] * n_cols,
+        colWidths=[0.65] + [0.18] * (n_cols - 1),
     )
+
     tabla.auto_set_font_size(False)
     tabla.set_fontsize(28)
-    # Escala ajustada: buena altura sin aplanar
-    tabla.scale(1.6, 3.2)
 
-    # Ajustar automáticamente el ancho de las columnas según contenido
-    for col_idx in range(n_cols):
-        tabla.auto_set_column_width(col=col_idx)
+    # 👉 Wrap REAL en celdas
+    for cell in tabla.get_celld().values():
+        cell.get_text().set_wrap(True)
+
+    # escala general moderada
+    tabla.scale(1.4, 1.8)
+
+    # ajuste FINO por fila
+    BASE_HEIGHT = 0.08
+    LINE_HEIGHT = 0.035
+
+    for (row, col), cell in tabla.get_celld().items():
+        if row == 0:
+            cell.set_height(BASE_HEIGHT * 1.2)
+        else:
+            text = cell.get_text().get_text()
+            n_lines = text.count("\n") + 1
+            cell.set_height(BASE_HEIGHT + (n_lines - 1) * LINE_HEIGHT)
+
+
+    # ============================
+    # AJUSTE DINÁMICO DE ALTURA DEL ENCABEZADO
+    # ============================
+
+    HEADER_BASE_HEIGHT = 0.075
+    HEADER_LINE_HEIGHT = 0.045
+
+    # Detectar máximo número de líneas del encabezado
+    max_header_lines = 1
+    for (row, col), cell in tabla.get_celld().items():
+        if row == 0:
+            text = cell.get_text().get_text()
+            n_lines = text.count("\n") + 1
+            max_header_lines = max(max_header_lines, n_lines)
+
+    header_height = HEADER_BASE_HEIGHT + (max_header_lines - 1) * HEADER_LINE_HEIGHT
+
+    # Aplicar la MISMA altura a todas las celdas del header
+    for (row, col), cell in tabla.get_celld().items():
+        if row == 0:
+            cell.set_height(header_height)
+
+
+    # ============================
+    # AJUSTE DE ALTURA POR FILA
+    # (usa SOLO la columna de texto para calcular altura)
+    # ============================
+    TEXT_COL_IDX = 0      # normalmente la primera columna es la de texto largo (ej: "Grupo")
+    BASE_HEIGHT = 0.075   # altura base de fila (ajústalo si quieres más compacto)
+    LINE_HEIGHT = 0.035   # altura extra por cada línea adicional
+
+    # agrupar celdas por fila
+    rows = {}
+    for (row, col), cell in tabla.get_celld().items():
+        rows.setdefault(row, {})[col] = cell
+
+        for row, cols in rows.items():
+            if row == 0:
+                continue  # ← el header ya fue ajustado arriba
+            else:
+                text = cols[TEXT_COL_IDX].get_text().get_text()
+                n_lines = text.count("\n") + 1
+                height = BASE_HEIGHT + (n_lines - 1) * LINE_HEIGHT
+
+                for cell in cols.values():
+                    cell.set_height(height)
 
     # ===== Estilos de colores: encabezado azul, filas blancas (o color custom) =====
     header_bg = "#0e4a8f"

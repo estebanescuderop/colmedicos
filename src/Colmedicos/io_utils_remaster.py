@@ -2361,3 +2361,115 @@ def remover_contenedores_apendice(html: str) -> str:
     )
 
     return html
+
+
+import pandas as pd
+from typing import Dict, List, Tuple, Optional
+
+
+
+def reemplazar_textos(
+    df: pd.DataFrame,
+    columna: str = "Resultado",
+    reglas: Optional[Dict[str, str]] = None,
+    *,
+    rellenar_vacios_con: Optional[str] = None,  # <-- NUEVO
+    considerar_vacio_str: bool = True,          # "" o "   " cuentan como vacío
+    ignorar_mayusculas: bool = True,
+    solo_valor_completo: bool = True,
+) -> pd.DataFrame:
+    if columna not in df.columns:
+        raise ValueError(f"La columna '{columna}' no existe en el DataFrame.")
+
+    out = df.copy()
+    reglas = reglas or {}
+
+    # 1) Rellenar vacíos (None/NaN y opcionalmente "" / "   ")
+    if rellenar_vacios_con is not None:
+        s = out[columna]
+
+        # NaN / None
+        s = s.fillna(rellenar_vacios_con)
+
+        # "" o solo espacios
+        if considerar_vacio_str:
+            s_str = s.astype("string")
+            mask_vacios = s_str.str.strip().eq("")  # True para "" o "   "
+            s = s_str.mask(mask_vacios, rellenar_vacios_con)
+
+        out[columna] = s
+
+    # 2) Reglas de reemplazo
+    if reglas:
+        if solo_valor_completo:
+            if ignorar_mayusculas:
+                mapa_norm = {str(k).strip().lower(): v for k, v in reglas.items()}
+
+                def _map_cell(x):
+                    if pd.isna(x):
+                        return x
+                    key = str(x).strip().lower()
+                    return mapa_norm.get(key, x)
+
+                out[columna] = out[columna].map(_map_cell)
+            else:
+                out[columna] = out[columna].replace(reglas)
+        else:
+            s = out[columna].astype("string")
+            for src, dst in reglas.items():
+                s = s.str.replace(str(src), str(dst), case=not ignorar_mayusculas, regex=False)
+            out[columna] = s
+
+    return out
+
+import pandas as pd
+from typing import Dict, List
+
+
+def crear_resultado_agregado(
+    df: pd.DataFrame,
+    col_documento: str = "Documento",
+    col_tipo_prueba: str = "Tipo prueba",
+    col_resultado: str = "Resultado",
+    nueva_columna: str = "Resultado agregado",
+    reglas_por_tipo: Dict[str, Dict[str, List[str]]] = None,
+    valor_sin_dato: str = "Sin dato",
+    valor_sin_regla: str = "Sin clasificar",
+) -> pd.DataFrame:
+    """
+    Crea un resultado agregado por (Documento, Tipo prueba)
+    usando reglas específicas por tipo de prueba.
+    """
+
+    if reglas_por_tipo is None:
+        raise ValueError("Debe proporcionar reglas_por_tipo")
+
+    out = df.copy()
+
+    def evaluar_grupo(valores: pd.Series) -> str:
+        # valores es la serie de Resultados del grupo
+        resultados = valores.dropna().astype(str)
+
+        if resultados.empty:
+            return valor_sin_dato
+
+        # Obtenemos el tipo de prueba desde el índice del grupo
+        tipo = valores.name[1]  # (documento, tipo_prueba)
+
+        reglas_tipo = reglas_por_tipo.get(tipo)
+        if not reglas_tipo:
+            return valor_sin_regla
+
+        for resultado_final, disparadores in reglas_tipo.items():
+            if resultados.isin(disparadores).any():
+                return resultado_final
+
+        return valor_sin_regla
+
+    out[nueva_columna] = (
+        out
+        .groupby([col_documento, col_tipo_prueba])[col_resultado]
+        .transform(evaluar_grupo)
+    )
+
+    return out

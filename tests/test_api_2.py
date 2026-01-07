@@ -12,7 +12,7 @@ otra_ruta = r"C:\Users\EstebanEscuderoPuert\Downloads\muestra_plantilla.xlsx"
 # Ruta del archivo Excel
 ruta_archivo = r"C:\Users\EstebanEscuderoPuert\Downloads\Plantilla.xlsx"
 # Lee el archivo Excel (por defecto lee la primera hoja)
-df = pd.read_excel(ruta_archivo)
+df = pd.read_excel(otra_ruta)
 
 ctx = {
     "nombre_cliente": "TCC S.A.S.",
@@ -21,7 +21,6 @@ ctx = {
     "fecha_fin": "2025-09-31",
     "numero_personas": 51,
 }
-
 # Ruta del archivo Excel
 ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\prueba 4.xlsx"
 df_datos = pd.read_excel(ruta_archivos)
@@ -94,7 +93,8 @@ tareas = [
     },
 
     {
-      "criterios": {
+      "criterios": { 
+        "factores": "1. 'imc' igual o superior a 25, 2. 'presion' elevadas (>130/80mmHg), 3. 'talla' de 'genero' hombres por encima de >102cm o 'talla' del 'genero' mujeres por encima de >88cm.",
         "Riesgo Bajo": "Se usa si no hay ningún factor presente...",
         "Riesgo Moderado": "Se usa si se existe al menos 1 factor...",
         "Riesgo Alto": "Se usa si se cumplen 2 o más factores..."
