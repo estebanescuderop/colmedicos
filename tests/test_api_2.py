@@ -280,28 +280,28 @@ renombres = {
     "lab_Resultado_global": "Resultado"
 }
 
-inf, meta, df_datico = informe_final(df,
-                          df_datos,
-                          ctx,
-                          tareas=tareas,
-                          salida_html=r"C:\Users\EstebanEscuderoPuert\Downloads\Informe pruebas colmedicos\informes\informe_prueba1.html",
-                          aplicar_cie10=True,
-                          aplicar_union=True, 
-                          aplicar_expansion_json=True,
-                          col_texto_cie10="obs_diagnostico", 
-                          col_df1="obs_diagnostico", 
-                          col_df2="Code", 
-                          json_columna="laboratorios_incluidos",
-                          campos_a_extraer=campos,
-                          renombrar_campos=renombres
-                          )
+# inf, meta, df_datico = informe_final(df,
+#                           df_datos,
+#                           ctx,
+#                           tareas=tareas,
+#                           salida_html=r"C:\Users\EstebanEscuderoPuert\Downloads\Informe pruebas colmedicos\informes\informe_prueba1.html",
+#                           aplicar_cie10=True,
+#                           aplicar_union=True, 
+#                           aplicar_expansion_json=True,
+#                           col_texto_cie10="obs_diagnostico", 
+#                           col_df1="obs_diagnostico", 
+#                           col_df2="Code", 
+#                           json_columna="laboratorios_incluidos",
+#                           campos_a_extraer=campos,
+#                           renombrar_campos=renombres
+#                           )
 
 # # # # # Ruta del archivo Excel
 # # ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\Informe pruebas colmedicos\Prueba_mult_registros.xlsx"
 # # df_date = pd.read_excel(ruta_archivos)
 
-print(meta)
-df_datico.to_excel(r"C:\Users\EstebanEscuderoPuert\Downloads\output_.xlsx", index=False, engine="openpyxl")
+# print(meta)
+# df_datico.to_excel(r"C:\Users\EstebanEscuderoPuert\Downloads\output_.xlsx", index=False, engine="openpyxl")
 
 
 # out = aplicar_multiples_columnas_gpt5(df_date, tareas)
@@ -350,8 +350,8 @@ df_datico.to_excel(r"C:\Users\EstebanEscuderoPuert\Downloads\output_.xlsx", inde
 #                                 nueva_columna="analisis_osteomuscular")
 
 # #df_datos.to_excel(r"C:\Users\EstebanEscuderoPuert\Downloads\output_.xlsx", index=False, engine="openpyxl")
-# ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\output_.xlsx"
-# df_otro = pd.read_excel(ruta_archivos)
+ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\output_.xlsx"
+df_datos = pd.read_excel(ruta_archivos)
 
 # texto_completo = columnas_a_texto(df,"Titulo","Contenido")
 
@@ -455,150 +455,44 @@ Exposición Laboral
 # #print(out)
 
 
-# with open(r"C:\Users\EstebanEscuderoPuert\Downloads\output_.txt", "w", encoding="utf-8") as f:
-#     f.write(out)
+#with open(r"C:\Users\EstebanEscuderoPuert\Downloads\output_.txt", "w", encoding="utf-8") as f:
+#    f.write(df_datos)
 
-variable = """{
-      "chart_type": "piramide",
-      "function_name": "graficar_piramide",
-      "title": "Distribución poblacional por edad",
-      "xlabel": "grupo_edad",
-      "y": "documento",
-      "agg": "distinct_count",
+variable = """{'chart_type': 'tabla', 'function_name': 'graficar_tabla', 'title': 'Diagnostico por sistema', 'xlabel': 'Grupo', 'y': 'documento', 'agg': 'distinct_count', 'distinct_on': 'documento', 'drop_dupes_before_sum': False, 'unique_by': None, 'conditions_all': [], 'conditions_any': [], 'binning': None, 'stack_columns': None, 'color': None, 'colors_by_category': None, 'legend_col': None, 'show_legend': False, 'show_values': None, 'sort': None, 'limit_categories': None, 'needs_disambiguation': False, 'candidates': {'xlabel': [], 'y': []}, 'percentage_of': None, 'percentage_colname': None, 'extra_measures': None, 'hide_main_measure': None, 'add_total_row': False, 'add_total_column': False}"""
 
-      "distinct_on": "documento",
-      "drop_dupes_before_sum": false,
-      "unique_by": ["documento"],
+variable2 = [{'chart_type': 'tabla', 'function_name': 'graficar_tabla', 'title': 'Diagnostico por sistema', 'xlabel': 'Grupo', 'y': 'documento', 'agg': 'distinct_count', 'distinct_on': 'documento', 'drop_dupes_before_sum': False, 'unique_by': None, 'conditions_all': [], 'conditions_any': [], 'binning': None, 'stack_columns': None, 'color': None, 'colors_by_category': None, 'legend_col': None, 'show_legend': False, 'show_values': None, 'sort': None, 'limit_categories': None, 'needs_disambiguation': False, 'candidates': {'xlabel': [], 'y': []}, 'percentage_of': None, 'percentage_colname': None, 'extra_measures': None, 'hide_main_measure': None, 'add_total_row': False, 'add_total_column': False}]
 
-      "conditions_all": [
-        ["documento", "!=", null]
-      ],
-      "conditions_any": [],
-
-      "binning": {
-        "column": "edad",
-        "bins": ["-inf", 10, 20, 30, 40, 50, "+inf"],
-        "labels": ["0-10", "11-20", "21-30", "31-40", "41-50", "50+"],
-        "output_col": "grupo_edad"
-      },
-
-      "stack_columns": null,
-
-      "legend_col": "genero",
-      "colors_by_category": {
-        "F": "#E94F37",
-        "M": "#4A90E2"
-      },
-
-      "show_legend": true,
-      "show_values": false,
-
-      "sort": {
-        "by": "grupo_edad",
-        "order": "asc"
-      },
-
-      "limit_categories": null,
-      "needs_disambiguation": false,
-
-      "candidates": {
-        "xlabel": [],
-        "y": []
-      },
-
-      "percentage_of": null,
-      "percentage_colname": null,
-      "extra_measures": null,
-      "hide_main_measure": null,
-      "add_total_row": false,
-      "add_total_column": false
-    }
- """
-
-variable2 = [{
-      "chart_type": "piramide",
-      "function_name": "graficar_piramide",
-      "title": "Distribución poblacional por edad",
-      "xlabel": "grupo_edad",
-      "y": "documento",
-      "agg": "distinct_count",
-
-      "distinct_on": "documento",
-      "drop_dupes_before_sum": False,
-      "unique_by": ["documento"],
-
-      "conditions_all": [
-        ["documento", "!=", None]
-      ],
-      "conditions_any": [],
-
-      "binning": {
-        "column": "edad",
-        "bins": ["-inf", 10, 20, 30, 40, 50, "+inf"],
-        "labels": ["0-10", "11-20", "21-30", "31-40", "41-50", "50+"],
-        "output_col": "grupo_edad"
-      },
-
-      "stack_columns": None,
-
-      "legend_col": "genero",
-      "colors_by_category": {
-        "F": "#E94F37",
-        "M": "#4A90E2"
-      },
-
-      "show_legend": True,
-      "show_values": False,
-
-      "sort": {
-        "by": "grupo_edad",
-        "order": "asc"
-      },
-
-      "limit_categories": None,
-      "needs_disambiguation": False,
-
-      "candidates": {
-        "xlabel": [],
-        "y": []
-      },
-
-      "percentage_of": None,
-      "percentage_colname": None,
-      "extra_measures": None,
-      "hide_main_measure": None,
-      "add_total_row": False,
-      "add_total_column": False
-    }
-]
-
-#json_str = json.dumps(variable2, ensure_ascii=False, indent=2)
-# graficar = plot_from_params(df_datos,variable2[0])
-# print(graficar)
+json_str = json.dumps(variable2, ensure_ascii=False, indent=2)
+fig, ax = plot_from_params(df_datos,variable2[0])
+print(ax)
 
 
-# # out = _fig_to_data_uri(out)
-# # print(out)
-# # for item in out:
-# #     if isinstance(item, dict) and "params" in item:
-# #         idx, params, span = item["idx"], item["params"], item["span"]
-# #         params_list.append(params)
-# #         try:
-# #         fig, ax = plot_from_params(df, params)
-# #print(texto_completo)
-# #out = process_ia_blocks(texto_completo,ask_gpt5)
-# #print(out)
-# #out = ask_gpt5(texto_completo)
-# #print(out)
-# #df_final, res = procesar_df_una_fila(
-# #    df,
-# #    col_output="Output",
-# #    ctx=ctx,
-# #    df_datos=df_datos,
-# #    ask_fn=ask_gpt5,          # si necesitas IA
-# #    export_html=True,
-# #    titulo_html="Informe generado"
-# #)
+out = _fig_to_data_uri(fig)
+print(out)
+
+with open(r"C:\Users\EstebanEscuderoPuert\Downloads\output_.txt", "w", encoding="utf-8") as f:
+  f.write(out)
+
+# for item in out:
+#     if isinstance(item, dict) and "params" in item:
+#         idx, params, span = item["idx"], item["params"], item["span"]
+#         params_list.append(params)
+#         try:
+#         fig, ax = plot_from_params(df, params)
+# print(texto_completo)
+# out = process_ia_blocks(texto_completo,ask_gpt5)
+# print(out)
+# out = ask_gpt5(texto_completo)
+# print(out)
+# df_final, res = procesar_df_una_fila(
+#    df,
+#    col_output="Output",
+#    ctx=ctx,
+#    df_datos=df_datos,
+#    ask_fn=ask_gpt5,          # si necesitas IA
+#    export_html=True,
+#    titulo_html="Informe generado"
+# )
 
 
 

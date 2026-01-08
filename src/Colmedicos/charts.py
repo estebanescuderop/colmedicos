@@ -1,3 +1,4 @@
+#from curses import raw
 from Colmedicos.registry import register
 
 # ===========================
@@ -1129,7 +1130,6 @@ def _wrap_shorten_table(
             )
 
     return out
-
 def graficar_tabla(
     df: pd.DataFrame,
     xlabel: Optional[Union[str, List[str]]] = None,
@@ -1138,56 +1138,39 @@ def graficar_tabla(
     titulo: str = "Tabla de Datos",
     color: Optional[str] = None,
     *,
-    # Filtros / deduplicación
     unique_by: Optional[Union[str, List[str]]] = None,
     conditions_all: Optional[List[List[Any]]] = None,
     conditions_any: Optional[List[Union[List[Any], List[List[Any]]]]] = None,
-    # Agregación extendida
     distinct_on: Optional[str] = None,
     drop_dupes_before_sum: bool = False,
     where: Optional[pd.Series] = None,
-    # Columna de porcentaje
     percentage_of: Optional[str] = None,
     percentage_colname: str = "porcentaje",
-    # Top-N categorías
     limit_categories: Optional[int] = None,
-    # 👇 NUEVO: usar legend_col también en tablas
     legend_col: Optional[str] = None,
-    # 👇 NUEVO PARAMETRO multiples métricas
     extra_measures: Optional[List[Dict[str, Any]]] = None,
     hide_main_measure: bool = False,
     add_total_row: bool = False,
     add_total_column: bool = False,
 ) -> Tuple[plt.Figure, plt.Axes]:
-    """
-    Tabla con:
-      - xlabel como str o list[str] (se combina con _ensure_xlabel)
-      - filtros AND/OR, unique_by, distinct_on y agregaciones extendidas
-      - opcionalmente, legend_col para pivotear columnas por categoría
-    """
+
     if not isinstance(df, pd.DataFrame):
         raise TypeError("El parámetro 'df' debe ser un DataFrame de pandas.")
 
-    # Aceptar multi-X → combinar etiquetas
+    # =========================
+    # PREPARACIÓN DE DATOS
+    # =========================
     df2, xlabel_final, _ = _ensure_xlabel(df, xlabel)
 
-    # y_cols
     if y is None:
         y_cols = df2.select_dtypes(include=[np.number]).columns.tolist()
-        # permitir tablas con conteo único vía distinct_on aun si no hay numéricas
-        if not y_cols and not (distinct_on and isinstance(agg, str) and agg in ("count", "distinct_count")):
+        if not y_cols and not (distinct_on and agg in ("count", "distinct_count")):
             raise ValueError("No se encontraron columnas numéricas para la tabla.")
     elif isinstance(y, str):
-        if y not in df2.columns:
-            raise ValueError(f"La columna '{y}' no existe en el DataFrame.")
         y_cols = [y]
     else:
-        missing = [col for col in y if col not in df2.columns]
-        if missing:
-            raise ValueError(f"Las siguientes columnas no existen en el DataFrame: {missing}")
         y_cols = y
 
-    # Filtro y deduplicación previa
     dff = _prefilter_df(
         df2,
         unique_by=unique_by,
@@ -1195,20 +1178,10 @@ def graficar_tabla(
         conditions_any=conditions_any,
     )
 
-    # --- Preparar claves de agrupación (X + legend_col opcional) ---
     group_x = xlabel_final
     if legend_col:
-        if legend_col not in dff.columns:
-            raise ValueError(f"La columna de leyenda '{legend_col}' no existe en el DataFrame.")
-        if group_x is None:
-            group_x = legend_col
-        else:
-            if isinstance(group_x, str):
-                group_x = [group_x, legend_col]
-            else:
-                group_x = list(group_x) + [legend_col]
+        group_x = [group_x, legend_col] if group_x else legend_col
 
-    # --- Agregar (respeta distinct_count / sum_distinct / distinct_on) ---
     df_plot = _aggregate_frame(
         dff,
         xlabel=group_x,
@@ -1219,335 +1192,426 @@ def graficar_tabla(
         where=where,
     )
 
-    # Si es Series → DataFrame
     if isinstance(df_plot, pd.Series):
-        df_plot = df_plot.to_frame(name=y_cols[0] if y_cols else "valor")
+        df_plot = df_plot.to_frame(name=y_cols[0])
 
-    # --- Pivot por legend_col → columnas por categoría ---
-    if legend_col and isinstance(df_plot.index, pd.MultiIndex) and len(df_plot.columns) == 1:
-        # Por ahora solo soportamos 1 métrica para el pivot
-        metric_col = df_plot.columns[0]
-        # columnas = categorías de legend_col
-        df_wide = df_plot[metric_col].unstack(level=-1)
-        # index (xlabel) pasa a columnas normales
-        df_plot = df_wide.reset_index()
-        # IMPORTANTE: en este modo no usamos percentage_of (no es obvio a qué columna aplica)
-        if percentage_of:
-            raise ValueError(
-                "Por ahora no se soporta 'percentage_of' cuando se usa 'legend_col' en tablas. "
-                "Quita percentage_of del JSON o no uses legend_col."
-            )
-    else:
-        # Reset index normal
-        df_plot = df_plot.reset_index() if group_x is not None else df_plot.reset_index(drop=True)
+    df_plot = df_plot.reset_index()
 
-    # ============================================================
-    # Procesar extra_measures (múltiples agregaciones)
-    # ============================================================
-    if extra_measures:
-        for measure in extra_measures:
-            col_name = measure.get("name")
-            if not col_name:
-                raise ValueError("Cada 'extra_measure' debe incluir 'name'.")
+    if hide_main_measure and extra_measures:
+        keep = [df_plot.columns[0]] + [m["name"] for m in extra_measures if m["name"] in df_plot.columns]
+        df_plot = df_plot[keep]
 
-            # Condiciones específicas para esta medida
-            m_all = measure.get("conditions_all")
-            m_any = measure.get("conditions_any")
+    if limit_categories:
+        df_plot = _apply_top_n_general(df_plot, df_plot.columns[0], limit_categories)
 
-            # Agregación específica
-            agg_m = measure.get("agg", agg)
-
-            # distinct_on propio (o hereda si no está)
-            distinct_m = measure.get("distinct_on", distinct_on)
-
-            # Filtro independiente
-            dff_m = _prefilter_df(
-                dff,
-                unique_by=unique_by,
-                conditions_all=m_all,
-                conditions_any=m_any,
-            )
-
-            # Agregación independiente
-            df_extra = _aggregate_frame(
-                dff_m,
-                xlabel=group_x,
-                y_cols=y_cols,
-                agg=agg_m,
-                distinct_on=distinct_m,
-                drop_dupes_before_sum=drop_dupes_before_sum,
-                where=where,
-            )
-
-            # Normalizar a DataFrame
-            if isinstance(df_extra, pd.Series):
-                df_extra = df_extra.to_frame(name=col_name)
-            else:
-                df_extra.columns = [col_name]
-
-            # Reset index para unir
-            df_extra = df_extra.reset_index()
-
-            # Unir por la primera columna (etiqueta)
-            label_col = df_plot.columns[0]
-            df_plot = df_plot.merge(df_extra, on=label_col, how="left")
-
-    # ===========================================================
-    # OCULTAR LA MEDIDA PRINCIPAL (si el usuario lo solicita)
-    # ===========================================================
-    if hide_main_measure:
-        # La primera columna SIEMPRE es el xlabel ("habito")
-        first_column = df_plot.columns[0]
-
-        # Las columnas extra son las declaradas en el JSON
-        extra_cols = []
-        if extra_measures:
-            for m in extra_measures:
-                col = m.get("name")
-                if col in df_plot.columns:
-                    extra_cols.append(col)
-
-        # Construimos la tabla final SIN la medida base
-        keep_cols = [first_column] + extra_cols
-
-        # Filtrar
-        df_plot = df_plot[keep_cols]
-
-    # ===========================================================
-    # TOP-N + Otros
-    # ===========================================================
-    if limit_categories and limit_categories > 0:
-        # La primera columna SIEMPRE es la etiqueta (tras pivot/reset)
-        label_col = df_plot.columns[0]
-        df_plot = _apply_top_n_general(df_plot, label_col, limit_categories)
-
-    # --- Columna de porcentaje opcional (solo cuando NO hay pivot por legend_col) ---
-    if percentage_of and not legend_col:
-        if percentage_of not in df_plot.columns:
-            raise ValueError(f"percentage_of='{percentage_of}' no existe en la tabla resultante.")
-        col_num = pd.to_numeric(df_plot[percentage_of], errors="coerce")
-        total = col_num.sum()
-        if total and not np.isnan(total):
-            df_plot[percentage_colname] = np.where(
-                col_num.notna(),
-                col_num / total,  # proporción (0.45 → 45%)
-                np.nan,
-            )
-        else:
-            df_plot[percentage_colname] = np.nan
+    if percentage_of and percentage_of in df_plot.columns:
+        total = df_plot[percentage_of].sum()
+        df_plot[percentage_colname] = df_plot[percentage_of] / total if total else 0
 
     if add_total_row:
-        numeric_cols = df_plot.select_dtypes(include=[np.number]).columns
-        if len(numeric_cols) > 0:
-            total_row = df_plot[numeric_cols].sum()
-            first_col = df_plot.columns[0]
-            total_row[first_col] = "TOTAL"
-            total_df = pd.DataFrame([total_row])
-            df_plot = pd.concat([df_plot, total_df], ignore_index=True)
+        total_row = df_plot.select_dtypes(include=[np.number]).sum()
+        total_row[df_plot.columns[0]] = "TOTAL"
+        df_plot = pd.concat([df_plot, pd.DataFrame([total_row])], ignore_index=True)
 
     if add_total_column:
-        numeric_cols = df_plot.select_dtypes(include=[np.number]).columns
-        if len(numeric_cols) > 0:
-            df_plot["TOTAL"] = df_plot[numeric_cols].sum(axis=1)
+        num_cols = df_plot.select_dtypes(include=[np.number]).columns
+        df_plot["TOTAL"] = df_plot[num_cols].sum(axis=1)
 
-    # ---------- Formateo base ----------
-    df_display = df_plot.copy()
-    for col in df_display.columns:
-        if is_numeric_dtype(df_display[col]):
-            if col != percentage_colname:
-                df_display[col] = df_display[col].round(2)
-        elif is_datetime64_any_dtype(df_display[col]):
-            df_display[col] = df_display[col].dt.strftime("%Y-%m-%d")
-    # Llenar NA numéricos con 0 y convertir todo a string después
-    df_numeric_filled = df_plot.copy()
+    # =========================
+    # FORMATEO
+    # =========================
+    df_plot = df_plot.fillna("")
 
-    for col in df_numeric_filled.columns:
-        # si la columna es numérica → llenar NA con 0
-        if pd.api.types.is_numeric_dtype(df_numeric_filled[col]):
-            df_numeric_filled[col] = df_numeric_filled[col].fillna(0)
-        else:
-            # si no es numérica, llenar NA con "" (texto vacío)
-            df_numeric_filled[col] = df_numeric_filled[col].fillna("")
+    df_formatted = df_plot.astype(str)
 
-    # Convertir todo a string para el render final
-    df_display = df_numeric_filled.astype(str)
+    df_formatted = _wrap_shorten_table(
+        df_formatted,
+        wrap_width=60,
+        max_chars=120,
+    )
 
-    def _format_number(x):
-        if pd.isna(x):
-            return ""
-        if x == 0:
-            return "0"           # 👈 NUEVA REGLA
-        if x >= 1:
-            return f"{x:,.0f}"
-        return f"{x:.2f}"
-
-    # Formatear números con separador de miles y porcentajes
-    df_formatted = df_display.copy()
-    for col in df_display.columns:
-        try:
-            numeric_col = pd.to_numeric(df_display[col], errors="coerce")
-            if numeric_col.notna().any():
-                if col == percentage_colname:
-                    df_formatted[col] = numeric_col.apply(
-                        lambda x: f"{x:.0%}" if pd.notna(x) else ""
-                    )
-                else:
-                    df_formatted[col] = numeric_col.apply(_format_number)
-        except Exception:
-            pass
-
-    # ========= Figura y tabla =========
+    # =========================
+    # FIGURA SIN ESPACIOS
+    # =========================
     n_cols = len(df_formatted.columns)
     n_rows = len(df_formatted)
 
-    # Ancho/alto base de la figura (garantiza legibilidad)
     fig_w = max(18, n_cols * 1.0)
     fig_h = max(9, n_rows * 1.0)
 
-    fig, ax = plt.subplots(figsize=(fig_w, fig_h), facecolor="white")
+    fig = plt.figure(figsize=(fig_w, fig_h), facecolor="white")
+    ax = fig.add_axes([0, 0, 1, 1])  # ⬅ CLAVE: ocupa todo el canvas
     ax.axis("off")
+    fig_h_mm = fig.get_size_inches()[1] * 25.4
 
-    # === PREVENCIÓN DE TABLA VACÍA ===
-    if df_formatted.empty:
-        fig, ax = plt.subplots(figsize=(10, 2))
-        ax.axis("off")
-        ax.text(
-            0.5,
-            0.5,
-            "No hay datos para mostrar en la tabla",
-            ha="center",
-            va="center",
-            fontsize=18,
-            fontweight="bold",
-        )
-        return fig, ax
-
-    # === Envolver y acortar textos largos en celdas ===
-    wrap_width_table = 30
-    max_chars_table = 150
-    df_formatted = _wrap_shorten_table(
-        df_formatted,
-        wrap_width=wrap_width_table,
-        max_chars=max_chars_table,
-    )
-    
     from textwrap import fill
-    col_labels = [fill(str(c), width=18) for c in df_formatted.columns.tolist()] 
-    # Crear la tabla principal
+
+    col_labels = [
+        fill(str(c), width=18) for c in df_formatted.columns.tolist()
+    ]
+
+    # 🔹 Anchos robustos
+    TEXT_COL_RATIO = 0.7
+    REST_RATIO = 1 - TEXT_COL_RATIO
+    col_widths = (
+        [TEXT_COL_RATIO] + [REST_RATIO / (n_cols - 1)] * (n_cols - 1)
+        if n_cols > 1 else [1.0]
+    )
+    # =========================
+    # TABLA
+    # =========================
     tabla = ax.table(
         cellText=df_formatted.values.tolist(),
-        colLabels= col_labels,       #df_formatted.columns.tolist(),
+        colLabels=col_labels,
         cellLoc="center",
-        loc="center",
-        colWidths=[0.65] + [0.18] * (n_cols - 1),
+        bbox=[0, 0, 1, 1],
+        colWidths=col_widths,
     )
 
     tabla.auto_set_font_size(False)
     tabla.set_fontsize(28)
-
-    # 👉 Wrap REAL en celdas
-    for cell in tabla.get_celld().values():
-        cell.get_text().set_wrap(True)
-
-    # escala general moderada
     tabla.scale(1.4, 1.8)
 
-    # ajuste FINO por fila
-    BASE_HEIGHT = 0.08
-    LINE_HEIGHT = 0.035
+    for cell in tabla.get_celld().values():
+        cell.get_text().set_wrap(True)
+        cell.PAD = 0.3
 
-    for (row, col), cell in tabla.get_celld().items():
-        if row == 0:
-            cell.set_height(BASE_HEIGHT * 1.2)
-        else:
-            text = cell.get_text().get_text()
-            n_lines = text.count("\n") + 1
-            cell.set_height(BASE_HEIGHT + (n_lines - 1) * LINE_HEIGHT)
+    # =========================
+    # ALTURA POR FILA (ESTABLE)
+    # =========================
 
+    def _row_height_from_text(
+        text: str,
+        *,
+        fontsize: int,
+        base: float,
+        line_factor: float,
+        fig_h_mmm: float,         # <-- alto de la figura en mm
+        extra_mm: float = 5.0    # <-- los 5 mm extra
+    ) -> float:
+        n_lines = text.count("\n") + 1
+        extra = extra_mm / fig_h_mmm 
+        tamano = base + (n_lines * fontsize * line_factor)
+        return tamano # <-- convierte mm a fracción del alto del axes
 
-    # ============================
-    # AJUSTE DINÁMICO DE ALTURA DEL ENCABEZADO
-    # ============================
+    BASE_HEIGHT = 0.02
+    LINE_FACTOR = 0.0015
+    TEXT_COL_IDX = 0
+    FONT_SIZE_BODY = 28
+    FONT_SIZE_HEADER = 36
+    TEXT_COL_IDX = 0
 
-    HEADER_BASE_HEIGHT = 0.075
-    HEADER_LINE_HEIGHT = 0.045
-
-    # Detectar máximo número de líneas del encabezado
-    max_header_lines = 1
-    for (row, col), cell in tabla.get_celld().items():
-        if row == 0:
-            text = cell.get_text().get_text()
-            n_lines = text.count("\n") + 1
-            max_header_lines = max(max_header_lines, n_lines)
-
-    header_height = HEADER_BASE_HEIGHT + (max_header_lines - 1) * HEADER_LINE_HEIGHT
-
-    # Aplicar la MISMA altura a todas las celdas del header
-    for (row, col), cell in tabla.get_celld().items():
-        if row == 0:
-            cell.set_height(header_height)
-
-
-    # ============================
-    # AJUSTE DE ALTURA POR FILA
-    # (usa SOLO la columna de texto para calcular altura)
-    # ============================
-    TEXT_COL_IDX = 0      # normalmente la primera columna es la de texto largo (ej: "Grupo")
-    BASE_HEIGHT = 0.075   # altura base de fila (ajústalo si quieres más compacto)
-    LINE_HEIGHT = 0.035   # altura extra por cada línea adicional
-
-    # agrupar celdas por fila
     rows = {}
     for (row, col), cell in tabla.get_celld().items():
         rows.setdefault(row, {})[col] = cell
 
-        for row, cols in rows.items():
-            if row == 0:
-                continue  # ← el header ya fue ajustado arriba
-            else:
-                text = cols[TEXT_COL_IDX].get_text().get_text()
-                n_lines = text.count("\n") + 1
-                height = BASE_HEIGHT + (n_lines - 1) * LINE_HEIGHT
+    for row, cols in rows.items():
+        if row == 0:
+            # header: medir todas las columnas
+            max_text = max(
+                cell.get_text().get_text() for cell in cols.values()
+            )
+            height = _row_height_from_text(
+                max_text,
+                fontsize=FONT_SIZE_HEADER,
+                base=BASE_HEIGHT,
+                line_factor=LINE_FACTOR,
+                fig_h_mmm=fig_h_mm,
+                extra_mm=5.0,
+            )
+        else:
+            text = cols[TEXT_COL_IDX].get_text().get_text()
+            height = _row_height_from_text(
+                text,
+                fontsize=FONT_SIZE_BODY,
+                base=BASE_HEIGHT,
+                line_factor=LINE_FACTOR,
+                fig_h_mmm=fig_h_mm,
+                extra_mm=5.0,
+            )
 
-                for cell in cols.values():
-                    cell.set_height(height)
+        for cell in cols.values():
+            cell.set_height(height)
 
-    # ===== Estilos de colores: encabezado azul, filas blancas (o color custom) =====
+
+    # =========================
+    # ESTILOS
+    # =========================
     header_bg = "#0e4a8f"
     data_bg = color if color else "#ffffff"
+    header_text_color = "white"
 
-    n_rows = len(df_formatted)
-    for (row, col_idx), cell in tabla.get_celld().items():
+    for (row, col), cell in tabla.get_celld().items():
         if row == 0:
-            # Encabezado
-            text_color = "#212121" if header_bg.lower() in ("#fff", "#ffffff", "white") else "white"
-            cell.set_text_props(weight="bold", color=text_color, fontsize=36)
             cell.set_facecolor(header_bg)
+            cell.set_text_props(weight="bold", fontsize=36, color=header_text_color)
         else:
-            # Filas de datos
-            valor = cell.get_text().get_text()
-            try:
-                float(valor.replace(",", ""))
-                cell.set_text_props(color="#212121", fontsize=32, weight="bold")
-            except Exception:
-                cell.set_text_props(color="#2c3e50", fontsize=28, weight="normal")
-
+            if col == 0:
+                cell.set_text_props(fontsize=28, color="#2c3e50")
+            else:
+                cell.set_text_props(fontsize=28, weight="bold", color="#212121")
             cell.set_facecolor(data_bg)
 
-        # Borde interno gris oscuro
         cell.set_edgecolor("#292929")
         cell.set_linewidth(1.2)
-        cell.PAD = 0.3
 
-    # Título (en tu flujo general se suele vaciar desde plot_from_params,
-    # pero aquí mantenemos la lógica por si se usa directo)
     if titulo:
-        ax.set_title(titulo, fontsize=38, fontweight="bold", pad=60, color="#141414")
-
-    # Ajustar layout para minimizar espacios en blanco sin deformar la tabla
-    fig.tight_layout(pad=0.5)
+        ax.set_title(titulo, fontsize=38, fontweight="bold", pad=40, color="#141414")
 
     return fig, ax
+# def _wrap_shorten_table(
+#     df: pd.DataFrame,
+#     *,
+#     wrap_width: int = 25,
+#     max_chars: int = 120,
+#     exclude_cols: list[str] | None = None
+# ) -> pd.DataFrame:
+#     """
+#     Envuelve texto largo en celdas de una tabla usando saltos de línea.
+#     Aplica SOLO a columnas no numéricas.
+#     """
+#     exclude_cols = set(exclude_cols or [])
+#     out = df.copy()
+
+#     for col in out.columns:
+#         if col in exclude_cols:
+#             continue
+#         if not is_numeric_dtype(out[col]):
+#             out[col] = out[col].apply(
+#                 lambda x: _wrap_shorten(x, max_chars=max_chars, wrap_width=wrap_width)
+#             )
+
+#     return out
+
+
+# def graficar_tabla(
+#     df: pd.DataFrame,
+#     xlabel: Optional[Union[str, List[str]]] = None,
+#     y: Optional[Union[str, List[str]]] = None,
+#     agg: Union[str, Dict[str, str]] = "sum",
+#     titulo: str = "Tabla de Datos",
+#     color: Optional[str] = None,
+#     *,
+#     unique_by: Optional[Union[str, List[str]]] = None,
+#     conditions_all: Optional[List[List[Any]]] = None,
+#     conditions_any: Optional[List[Union[List[Any], List[List[Any]]]]] = None,
+#     distinct_on: Optional[str] = None,
+#     drop_dupes_before_sum: bool = False,
+#     where: Optional[pd.Series] = None,
+#     percentage_of: Optional[str] = None,
+#     percentage_colname: str = "porcentaje",
+#     limit_categories: Optional[int] = None,
+#     legend_col: Optional[str] = None,
+#     extra_measures: Optional[List[Dict[str, Any]]] = None,
+#     hide_main_measure: bool = False,
+#     add_total_row: bool = False,
+#     add_total_column: bool = False,
+# ) -> Tuple[plt.Figure, plt.Axes]:
+
+#     # =========================
+#     # VALIDACIÓN
+#     # =========================
+#     if not isinstance(df, pd.DataFrame):
+#         raise TypeError("El parámetro 'df' debe ser un DataFrame de pandas.")
+
+#     # =========================
+#     # PREPARACIÓN DE DATOS
+#     # =========================
+#     df2, xlabel_final, _ = _ensure_xlabel(df, xlabel)
+
+#     if y is None:
+#         y_cols = df2.select_dtypes(include=[np.number]).columns.tolist()
+#         if not y_cols and not (distinct_on and agg in ("count", "distinct_count")):
+#             raise ValueError("No se encontraron columnas numéricas para la tabla.")
+#     elif isinstance(y, str):
+#         y_cols = [y]
+#     else:
+#         y_cols = y
+
+#     dff = _prefilter_df(
+#         df2,
+#         unique_by=unique_by,
+#         conditions_all=conditions_all,
+#         conditions_any=conditions_any,
+#     )
+
+#     group_x = xlabel_final
+#     if legend_col:
+#         group_x = [group_x, legend_col] if group_x else legend_col
+
+#     df_plot = _aggregate_frame(
+#         dff,
+#         xlabel=group_x,
+#         y_cols=y_cols,
+#         agg=agg,
+#         distinct_on=distinct_on,
+#         drop_dupes_before_sum=drop_dupes_before_sum,
+#         where=where,
+#     )
+
+#     if isinstance(df_plot, pd.Series):
+#         df_plot = df_plot.to_frame(name=y_cols[0] if y_cols else "valor")
+
+#     df_plot = df_plot.reset_index()
+
+#     if hide_main_measure and extra_measures:
+#         keep = [df_plot.columns[0]] + [
+#             m["name"] for m in extra_measures
+#             if isinstance(m, dict) and m.get("name") in df_plot.columns
+#         ]
+#         df_plot = df_plot[keep]
+
+#     if limit_categories:
+#         df_plot = _apply_top_n_general(df_plot, df_plot.columns[0], limit_categories)
+
+#     if percentage_of and percentage_of in df_plot.columns:
+#         total = pd.to_numeric(df_plot[percentage_of], errors="coerce").sum()
+#         df_plot[percentage_colname] = (
+#             pd.to_numeric(df_plot[percentage_of], errors="coerce") / total
+#             if total else 0
+#         )
+
+#     if add_total_row:
+#         total_row = df_plot.select_dtypes(include=[np.number]).sum(numeric_only=True)
+#         total_row[df_plot.columns[0]] = "TOTAL"
+#         df_plot = pd.concat([df_plot, pd.DataFrame([total_row])], ignore_index=True)
+
+#     if add_total_column:
+#         num_cols = df_plot.select_dtypes(include=[np.number]).columns
+#         if len(num_cols) > 0:
+#             df_plot["TOTAL"] = df_plot[num_cols].sum(axis=1)
+
+#     # =========================
+#     # FORMATEO + WRAP ADAPTATIVO
+#     # =========================
+#     df_plot = df_plot.fillna("")
+#     numeric_cols = df_plot.select_dtypes(include=[np.number]).columns.tolist()
+#     df_formatted = df_plot.astype(str)
+
+#     first_col = df_formatted.columns[0]
+#     max_len_first = df_formatted[first_col].str.len().max() if len(df_formatted) else 0
+
+#     if max_len_first >= 140:
+#         wrap_width, max_chars = 52, 240
+#     elif max_len_first >= 90:
+#         wrap_width, max_chars = 44, 210
+#     else:
+#         wrap_width, max_chars = 30, 150
+
+#     df_formatted = _wrap_shorten_table(
+#         df_formatted,
+#         wrap_width=wrap_width,
+#         max_chars=max_chars,
+#         exclude_cols=numeric_cols,
+#     )
+
+#     # =========================
+#     # FIGURA
+#     # =========================
+#     n_cols = len(df_formatted.columns)
+#     n_rows = len(df_formatted)
+
+#     fig_w = max(12, n_cols * 3.0)
+#     fig_h = max(4.8, (n_rows + 1) * 0.9)
+
+#     fig = plt.figure(figsize=(fig_w, fig_h), facecolor="white")
+#     ax = fig.add_axes([0, 0, 1, 1])
+#     ax.axis("off")
+
+#     # =========================
+#     # HEADERS
+#     # =========================
+#     from textwrap import fill
+#     header_wrap = 18 if n_cols <= 3 else 14
+#     col_labels = [fill(str(c), width=header_wrap) for c in df_formatted.columns]
+
+#     # =========================
+#     # ANCHOS DE COLUMNA
+#     # =========================
+#     if n_cols == 1:
+#         col_widths = [1.0]
+#     else:
+#         if n_cols == 2:
+#             text_ratio = 0.80 if max_len_first >= 120 else 0.76 if max_len_first >= 80 else 0.70
+#         else:
+#             text_ratio = 0.68 if max_len_first >= 120 else 0.64 if max_len_first >= 80 else 0.60
+
+#         rest_ratio = 1.0 - text_ratio
+#         col_widths = [text_ratio] + [rest_ratio / (n_cols - 1)] * (n_cols - 1)
+
+#     # =========================
+#     # TABLA
+#     # =========================
+#     tabla = ax.table(
+#         cellText=df_formatted.values.tolist(),
+#         colLabels=col_labels,
+#         cellLoc="center",
+#         colWidths=col_widths,
+#         bbox=[0, 0, 1, 1],
+#     )
+
+#     tabla.auto_set_font_size(False)
+#     tabla.set_fontsize(28)
+
+#     for cell in tabla.get_celld().values():
+#         cell.get_text().set_wrap(True)
+#         cell.PAD = 0.22
+
+#     # =========================
+#     # ALTURAS POR FILA + BBOX DINÁMICO
+#     # =========================
+#     HEADER_BASE, HEADER_LINE = 0.11, 0.06
+#     BODY_BASE, BODY_LINE = 0.085, 0.04
+
+#     rows = {}
+#     for (r, c), cell in tabla.get_celld().items():
+#         rows.setdefault(r, []).append(cell)
+
+#     desired_heights = {}
+#     for r, cells in rows.items():
+#         max_lines = max(cell.get_text().get_text().count("\n") + 1 for cell in cells)
+#         desired_heights[r] = (
+#             HEADER_BASE + (max_lines - 1) * HEADER_LINE
+#             if r == 0 else
+#             BODY_BASE + (max_lines - 1) * BODY_LINE
+#         )
+
+#     total_h = sum(desired_heights.values())
+#     bbox_h = min(0.98, max(0.35, total_h * 1.05))
+#     y0 = (1 - bbox_h) / 2
+#     tabla._bbox = [0.01, y0, 0.98, bbox_h]
+
+#     scale = bbox_h / total_h if total_h else 1
+#     for r, cells in rows.items():
+#         for cell in cells:
+#             cell.set_height(desired_heights[r] * scale)
+
+#     # =========================
+#     # ESTILOS
+#     # =========================
+#     header_bg = "#0e4a8f"
+#     data_bg = color if color else "#ffffff"
+
+#     for (r, c), cell in tabla.get_celld().items():
+#         if r == 0:
+#             cell.set_facecolor(header_bg)
+#             cell.set_text_props(weight="bold", fontsize=34, color="white")
+#         else:
+#             if c == 0:
+#                 cell.set_text_props(fontsize=25, color="#2c3e50")
+#             else:
+#                 cell.set_text_props(fontsize=25, weight="bold", color="#212121")
+#             cell.set_facecolor(data_bg)
+
+#         cell.set_edgecolor("#292929")
+#         cell.set_linewidth(1.2)
+
+#     if titulo:
+#         ax.set_title(titulo, fontsize=30, fontweight="bold", pad=20, color="#141414")
+
+#     return fig, ax
+
+
 
 def graficar_piramide(
     df: pd.DataFrame,
