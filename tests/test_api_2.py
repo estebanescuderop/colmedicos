@@ -12,7 +12,7 @@ otra_ruta = r"C:\Users\EstebanEscuderoPuert\Downloads\muestra_plantilla.xlsx"
 # Ruta del archivo Excel
 ruta_archivo = r"C:\Users\EstebanEscuderoPuert\Downloads\Plantilla.xlsx"
 # Lee el archivo Excel (por defecto lee la primera hoja)
-df = pd.read_excel(otra_ruta)
+df = pd.read_excel(ruta_archivo)
 
 ctx = {
     "nombre_cliente": "TCC S.A.S.",
@@ -280,28 +280,28 @@ renombres = {
     "lab_Resultado_global": "Resultado"
 }
 
-# inf, meta, df_datico = informe_final(df,
-#                           df_datos,
-#                           ctx,
-#                           tareas=tareas,
-#                           salida_html=r"C:\Users\EstebanEscuderoPuert\Downloads\Informe pruebas colmedicos\informes\informe_prueba1.html",
-#                           aplicar_cie10=True,
-#                           aplicar_union=True, 
-#                           aplicar_expansion_json=True,
-#                           col_texto_cie10="obs_diagnostico", 
-#                           col_df1="obs_diagnostico", 
-#                           col_df2="Code", 
-#                           json_columna="laboratorios_incluidos",
-#                           campos_a_extraer=campos,
-#                           renombrar_campos=renombres
-#                           )
+inf, meta, df_datico = informe_final(df,
+                          df_datos,
+                          ctx,
+                          tareas=tareas,
+                          salida_html=r"C:\Users\EstebanEscuderoPuert\Downloads\Informe pruebas colmedicos\informes\informe_prueba1.html",
+                          aplicar_cie10=True,
+                          aplicar_union=True, 
+                          aplicar_expansion_json=True,
+                          col_texto_cie10="obs_diagnostico", 
+                          col_df1="obs_diagnostico", 
+                          col_df2="Code", 
+                          json_columna="laboratorios_incluidos",
+                          campos_a_extraer=campos,
+                          renombrar_campos=renombres
+                          )
 
 # # # # # Ruta del archivo Excel
 # # ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\Informe pruebas colmedicos\Prueba_mult_registros.xlsx"
 # # df_date = pd.read_excel(ruta_archivos)
 
-# print(meta)
-# df_datico.to_excel(r"C:\Users\EstebanEscuderoPuert\Downloads\output_.xlsx", index=False, engine="openpyxl")
+print(meta)
+df_datico.to_excel(r"C:\Users\EstebanEscuderoPuert\Downloads\output_.xlsx", index=False, engine="openpyxl")
 
 
 # out = aplicar_multiples_columnas_gpt5(df_date, tareas)
@@ -350,8 +350,6 @@ renombres = {
 #                                 nueva_columna="analisis_osteomuscular")
 
 # #df_datos.to_excel(r"C:\Users\EstebanEscuderoPuert\Downloads\output_.xlsx", index=False, engine="openpyxl")
-ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\output_.xlsx"
-df_datos = pd.read_excel(ruta_archivos)
 
 # texto_completo = columnas_a_texto(df,"Titulo","Contenido")
 
@@ -458,20 +456,28 @@ Exposición Laboral
 #with open(r"C:\Users\EstebanEscuderoPuert\Downloads\output_.txt", "w", encoding="utf-8") as f:
 #    f.write(df_datos)
 
-variable = """{'chart_type': 'tabla', 'function_name': 'graficar_tabla', 'title': 'Diagnostico por sistema', 'xlabel': 'Grupo', 'y': 'documento', 'agg': 'distinct_count', 'distinct_on': 'documento', 'drop_dupes_before_sum': False, 'unique_by': None, 'conditions_all': [], 'conditions_any': [], 'binning': None, 'stack_columns': None, 'color': None, 'colors_by_category': None, 'legend_col': None, 'show_legend': False, 'show_values': None, 'sort': None, 'limit_categories': None, 'needs_disambiguation': False, 'candidates': {'xlabel': [], 'y': []}, 'percentage_of': None, 'percentage_colname': None, 'extra_measures': None, 'hide_main_measure': None, 'add_total_row': False, 'add_total_column': False}"""
 
-variable2 = [{'chart_type': 'tabla', 'function_name': 'graficar_tabla', 'title': 'Diagnostico por sistema', 'xlabel': 'Grupo', 'y': 'documento', 'agg': 'distinct_count', 'distinct_on': 'documento', 'drop_dupes_before_sum': False, 'unique_by': None, 'conditions_all': [], 'conditions_any': [], 'binning': None, 'stack_columns': None, 'color': None, 'colors_by_category': None, 'legend_col': None, 'show_legend': False, 'show_values': None, 'sort': None, 'limit_categories': None, 'needs_disambiguation': False, 'candidates': {'xlabel': [], 'y': []}, 'percentage_of': None, 'percentage_colname': None, 'extra_measures': None, 'hide_main_measure': None, 'add_total_row': False, 'add_total_column': False}]
-
-json_str = json.dumps(variable2, ensure_ascii=False, indent=2)
-fig, ax = plot_from_params(df_datos,variable2[0])
-print(ax)
+# ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\output_.xlsx"
+# df_datos = pd.read_excel(ruta_archivos)
 
 
-out = _fig_to_data_uri(fig)
-print(out)
 
-with open(r"C:\Users\EstebanEscuderoPuert\Downloads\output_.txt", "w", encoding="utf-8") as f:
-  f.write(out)
+# variable = """{'chart_type': 'tabla', 'function_name': 'graficar_tabla', 'title': 'Diagnostico por sistema', 'xlabel': 'Grupo', 'y': 'documento', 'agg': 'distinct_count', 'distinct_on': 'documento', 'drop_dupes_before_sum': False, 'unique_by': None, 'conditions_all': [], 'conditions_any': [], 'binning': None, 'stack_columns': None, 'color': None, 'colors_by_category': None, 'legend_col': None, 'show_legend': False, 'show_values': None, 'sort': None, 'limit_categories': None, 'needs_disambiguation': False, 'candidates': {'xlabel': [], 'y': []}, 'percentage_of': None, 'percentage_colname': None, 'extra_measures': None, 'hide_main_measure': None, 'add_total_row': False, 'add_total_column': False}"""
+
+# variable2 = [{'chart_type': 'tabla', 'function_name': 'graficar_tabla', 'title': 'Diagnostico por sistema', 'xlabel': 'Grupo', 'y': 'documento', 'agg': 'distinct_count', 'distinct_on': 'documento', 'drop_dupes_before_sum': False, 'unique_by': None, 'conditions_all': [], 'conditions_any': [], 'binning': None, 'stack_columns': None, 'color': None, 'colors_by_category': None, 'legend_col': None, 'show_legend': False, 'show_values': None, 'sort': None, 'limit_categories': None, 'needs_disambiguation': False, 'candidates': {'xlabel': [], 'y': []}, 'percentage_of': None, 'percentage_colname': None, 'extra_measures': None, 'hide_main_measure': None, 'add_total_row': False, 'add_total_column': False}]
+
+# json_str = json.dumps(variable2, ensure_ascii=False, indent=2)
+# fig, ax = plot_from_params(df_datos,variable2[0])
+# print(ax)
+
+
+# out = _fig_to_data_uri(fig)
+# print(out)
+
+# with open(r"C:\Users\EstebanEscuderoPuert\Downloads\output_.txt", "w", encoding="utf-8") as f:
+#   f.write(out)
+
+
 
 # for item in out:
 #     if isinstance(item, dict) and "params" in item:

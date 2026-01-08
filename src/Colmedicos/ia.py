@@ -11,7 +11,6 @@ import plotly.express as px
 from Colmedicos.registry import register
 from Colmedicos.config import OPENAI_API_KEY
 
-
 API_KEY = "API"
 API_KEY2 = "API"
 API_KEY3 = "API"
