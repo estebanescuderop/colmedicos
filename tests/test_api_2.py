@@ -12,7 +12,7 @@ otra_ruta = r"C:\Users\EstebanEscuderoPuert\Downloads\muestra_plantilla.xlsx"
 # Ruta del archivo Excel
 ruta_archivo = r"C:\Users\EstebanEscuderoPuert\Downloads\Plantilla.xlsx"
 # Lee el archivo Excel (por defecto lee la primera hoja)
-df = pd.read_excel(ruta_archivo)
+df = pd.read_excel(otra_ruta)
 
 ctx = {
     "nombre_cliente": "TCC S.A.S.",
@@ -280,7 +280,7 @@ renombres = {
     "lab_Resultado_global": "Resultado"
 }
 
-inf, meta, df_datico = informe_final(df,
+inf, meta, df_datico, json_op, json_grafos = informe_final(df,
                           df_datos,
                           ctx,
                           tareas=tareas,
@@ -303,6 +303,11 @@ inf, meta, df_datico = informe_final(df,
 print(meta)
 df_datico.to_excel(r"C:\Users\EstebanEscuderoPuert\Downloads\output_.xlsx", index=False, engine="openpyxl")
 
+with open(r"C:\Users\EstebanEscuderoPuert\Downloads\output_json_op.txt", "w", encoding="utf-8") as f:
+    f.write(json_op)
+
+with open(r"C:\Users\EstebanEscuderoPuert\Downloads\output_json_grafos.txt", "w", encoding="utf-8") as f:
+    f.write(json_grafos)
 
 # out = aplicar_multiples_columnas_gpt5(df_date, tareas)
 

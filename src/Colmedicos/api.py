@@ -196,7 +196,7 @@ def informe_final(
         # 2) Data blocks (solo si hay ||...|| en el texto)
         if hay_data:
             t2 = time.perf_counter()
-            uot = process_data_blocks(df_datos, text)
+            uot, json_op = process_data_blocks(df_datos, text)
             logs.append("Procesamiento de datos: OK")
             meta_detalle["t_data_blocks"] = round(time.perf_counter() - t2, 4)
             text_for_next = uot
@@ -238,12 +238,12 @@ def informe_final(
             # Si tu process_plot_blocks acepta kwargs tipo "fast=True"/"dpi=96"/"tight=False", pásalos aquí:
             if modo_rapido_plots:
                 try:
-                    out_plot = process_plot_blocks(df_datos, text_for_next)
+                    out_plot, json_grafos = process_plot_blocks(df_datos, text_for_next)
                 except TypeError:
                     # si no acepta kwargs extra, llama normal
-                    out_plot = process_plot_blocks(df_datos, text_for_next)
+                    out_plot, json_grafos = process_plot_blocks(df_datos, text_for_next)
             else:
-                out_plot = process_plot_blocks(df_datos, text_for_next)
+                out_plot, json_grafos = process_plot_blocks(df_datos, text_for_next)
 
             logs.append("Procesamiento de gráficas: OK")
             meta_detalle["t_plot_blocks"] = round(time.perf_counter() - t4, 4)
@@ -279,10 +279,13 @@ def informe_final(
                 "plot_blocks": hay_plot
             }
         }
-        return html_final, meta, df_datos
+        json_op = str(json_op) if json_op is not None else "{}"
+        json_grafos = str(json_grafos) if json_grafos is not None else "{}"
+
+        return html_final, meta, df_datos, json_op, json_grafos
 
     except Exception as e:
         duracion = round(time.perf_counter() - t0, 4)
         logs.append(f"ERROR general: {e}")
         meta = {"status": "ERROR", "error": str(e), "duracion_seg": duracion, "logs": logs, "detalle": meta_detalle}
-        return "", meta, df_datos
+        return "", meta, df_datos, "{}", "{}"

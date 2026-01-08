@@ -553,6 +553,8 @@ def process_data_blocks(
         except Exception as e:
             error_txt = f"[error:{str(e)}]"
             resultados_ops.append((idx, params, span, error_txt))
+    
+    json_operaciones = json.dumps(resultados_ops, ensure_ascii=False, indent=2)
 
     # -------------------------------------------------
     # 6️⃣ Reemplazar spans en texto
@@ -563,7 +565,7 @@ def process_data_blocks(
         formato="html"
     )
 
-    return texto_reemplazado
+    return texto_reemplazado, json_operaciones
 
 
 _TOKEN_RE = re.compile(r"#GRAFICA(?:[_\s]*([0-9]+))?#", flags=re.IGNORECASE)
@@ -806,7 +808,7 @@ def process_plot_blocks(
             except Exception as e:
                 if debug:
                     print("Error future gráficos:", e)
-    print(resultados_por_idx)
+    json_grafos = json.dumps(resultados_por_idx, ensure_ascii=False, indent=2)
     # -------------------------------------------------
     # 5️⃣ Renderizar gráficas (SECUENCIAL)
     # -------------------------------------------------
@@ -839,7 +841,7 @@ def process_plot_blocks(
         formato="html"
     )
 
-    return texto_reemplazado
+    return texto_reemplazado, json_grafos
 
 
 # def process_plot_blocks(df: pd.DataFrame, texto: str):

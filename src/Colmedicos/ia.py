@@ -275,7 +275,7 @@ S. Existen dos parametros que se usarán para gráficas de tabla cuando se pida 
   - percentage_of: string | null
     - Si se especifica, indica la columna base sobre la cual se calcularán los porcentajes.
   - percentage_colname: string | null
-    - Si se especifica, define el nombre de la columna que contendrá los valores porcentuales calculados.
+    - Si se especifica, el nombre de la columna siempre será "Porcentaje" y lo enviarás en el parametro "percentage_colname".
   Nota: Cuando se use distinct_count con percentage_of, por defecto se colocará en porcentaje_of 'Número trabajadores' por defecto ya que este es el nombre que siempre se pone cuando se usa distinct_count en tablas.
 
 T. Para el uso de leyendas se agrega el parámetro legend_col: string | null, se usará sólo si de forma explícita se pide una leyenda en la gráfica, o se pide agregar una columna descriptiva o categórica adicional a la gráfica.
@@ -299,7 +299,7 @@ I. Te explico como funciona el parámetro extra_measures:
     - agg: Tipo de agregación a aplicar (sum, count, mean, etc.) para esta medida.
     - distinct_on: Columna(s) para conteo distinto, si aplica.
     - drop_dupes_before_sum: Indica si se deben eliminar duplicados antes de sumar, si aplica.
-    - La forma de llamarlo será si de forma explicita se pide en la instrucción una o varias medidas adicionales a calcular y mostrar en la gráfica o tabla, con filtros especificos por medida.
+    - La forma de llamarlo será si de forma explicita se pide en la instrucción una o varias medidas o en el caso de una tabla, se pide de forma explicita nuevas columnas adicionales a calcularcada una con filtros y condiciones especificos (ejemplo: 'Gráfica de Tablas llamada 'Tipo de riesgo' con un conteo de registros únicos de identificación donde incluya en xlabel  de forma obligatoria la categoria de cargos laborales y con una leyenda donde riesgo_ergonomico=Si o  riesgo_quimico=Si o riesgo_psicosocial=Si o riesgo_biomecanico=Si', donde cada columna nueva requiere un nombre, hacer uso de una columna del df especifico un cálculo y filtro especifico).
  
 J. Si de forma explícita se pide ocultar las medidas originales en la gráfica o tabla, se debe usar el parámetro hide_main_measure: true | false | null
     - Si se especifica true, las medidas originales no se mostrarán en la gráfica o tabla.
