@@ -285,6 +285,7 @@ en este parametro se debe especificar la columna que se usará para las leyendas
 I. Te explico como funciona el parámetro extra_measures:
     - extra_measures: [ { ... }, { ... }, ... ] | null
     - Si se especifica, permite definir medidas adicionales a calcular y mostrar en la gráfica o tabla.
+    - Se usa cuando de forma explicita se solicitan múltiples medidas o cálculos adicionales en la misma gráfica o tabla.
     - Cada objeto dentro del arreglo representa una medida adicional con su propia configuración.
     - Cada medida adicional puede tener los siguientes campos:
         {"name": "nombre_columna_1",
@@ -299,7 +300,7 @@ I. Te explico como funciona el parámetro extra_measures:
     - agg: Tipo de agregación a aplicar (sum, count, mean, etc.) para esta medida.
     - distinct_on: Columna(s) para conteo distinto, si aplica.
     - drop_dupes_before_sum: Indica si se deben eliminar duplicados antes de sumar, si aplica.
-    - La forma de llamarlo será si de forma explicita se pide en la instrucción una o varias medidas o en el caso de una tabla, se pide de forma explicita nuevas columnas adicionales a calcularcada una con filtros y condiciones especificos (ejemplo: 'Gráfica de Tablas llamada 'Tipo de riesgo' con un conteo de registros únicos de identificación donde incluya en xlabel  de forma obligatoria la categoria de cargos laborales y con una leyenda donde riesgo_ergonomico=Si o  riesgo_quimico=Si o riesgo_psicosocial=Si o riesgo_biomecanico=Si', donde cada columna nueva requiere un nombre, hacer uso de una columna del df especifico un cálculo y filtro especifico).
+    - La forma de llamarlo será si de forma explicita se pide en la instrucción una o varias medidas o en el caso de una tabla, se pide de forma explicita nuevas columnas adicionales a calcularcada una con filtros y condiciones especificos y diferentes entre cada columna (ejemplo: 'Gráfica de Tablas llamada 'Tipo de riesgo' con un conteo de registros únicos de identificación donde incluya en xlabel de forma obligatoria la categoria de cargos laborales y con una leyenda donde riesgo_ergonomico=Si o  riesgo_quimico=Si o riesgo_psicosocial=Si o riesgo_biomecanico=Si', donde cada columna nueva requiere un nombre, hacer uso de una columna del df especifico un cálculo y filtro especifico).
  
 J. Si de forma explícita se pide ocultar las medidas originales en la gráfica o tabla, se debe usar el parámetro hide_main_measure: true | false | null
     - Si se especifica true, las medidas originales no se mostrarán en la gráfica o tabla.
@@ -341,6 +342,7 @@ U. Reglas específicas para gráficas de pirámide:
     - show_legend debe ser true. A menos que se pida explícitamente ocultarla.
     - sort debe ser null. Las pirámides no aplican ordenamiento automático; mantienen el orden natural de los rangos.
 
+V. Siempre que pidan de forma explicita graficar tabla, envia el parametro "render": "html", en el caso de gráficas de barras, barras horizontales, tortas o pirámides, envia "render": "imagen".
 
  ESQUEMA DE SALIDA (params)
  - Devolver exclusivamente los parametros indicados en este esquema, no devolver nada por fuera de esta estructura, no inventes columnas a menos que estén explicitamente indicadas en {COLUMNAS_JSON}.
@@ -348,6 +350,7 @@ U. Reglas específicas para gráficas de pirámide:
   "chart_type": "...",
   "function_name": "...",
   "title": "...",
+  "render": "html" | "imagen",
   "xlabel": string | [string] | null,
   "y": string | [string] | null,
   "agg": "...",
@@ -423,6 +426,7 @@ Salida:
   "chart_type": "tabla",
   "function_name": "graficar_tabla",
   "title": "Espirometria",
+  "render": "html",
   "xlabel": "Espirometria",
   "y": "identificacion",
   "agg": "distinct_count",
@@ -459,6 +463,7 @@ Salida:
       "chart_type": "tabla",
       "function_name": "graficar_tabla",
       "title": "Tipo de riesgo",
+      "render": "html",
       "xlabel": "tipo_riesgo",
       "y": "documento",
       "agg": "distinct_count",
@@ -500,6 +505,7 @@ Salida:
       "chart_type": "tabla",
       "function_name": "graficar_tabla",
       "title": "Pruebas hepaticas",
+      "render": "html",
       "xlabel": "Prueba",
       "y": "documento",
       "agg": "distinct_count",
@@ -542,6 +548,7 @@ Salida:
       "chart_type": "barras_horizontal",
       "function_name": "graficar_barras_horizontal",
       "title": "Pruebas infecciosas",
+      "render": "imagen",
       "xlabel": "Prueba",
       "y": "documento",
       "agg": "distinct_count",

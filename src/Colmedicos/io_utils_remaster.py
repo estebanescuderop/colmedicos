@@ -574,48 +574,90 @@ _TOKEN_RE = re.compile(r"#GRAFICA(?:[_\s]*([0-9]+))?#", flags=re.IGNORECASE)
 # 5) Función que calcula gráficos.
 # ----------------------------
 
-def _fig_to_data_uri(fig) -> str:
+def rescale_image(img, *, max_width: int = 1200, max_height: int = 800):
+    """
+    Reescala una imagen PIL manteniendo aspect ratio (sin deformar).
+    Nunca hace upscale (si ya es más pequeña, la deja igual).
+    """
+    from PIL import Image
+
+    if not isinstance(img, Image.Image):
+        raise TypeError(f"rescale_image espera PIL.Image.Image, recibió: {type(img)}")
+
+    orig_w, orig_h = img.size
+    scale_w = max_width / orig_w
+    scale_h = max_height / orig_h
+    scale = min(scale_w, scale_h, 1.0)  # no upscale
+
+    new_w = int(orig_w * scale)
+    new_h = int(orig_h * scale)
+
+    if (new_w, new_h) == (orig_w, orig_h):
+        return img
+
+    return img.resize((new_w, new_h), Image.LANCZOS)
+
+
+def _fig_to_data_uri(
+    fig,
+    *,
+    # 👇 Tamaño estándar final (ajústalo a tu gusto)
+    max_width: int = 1200,
+    max_height: int = 800,
+    # 👇 Render inicial (antes de reescalar). Más dpi/scale = más nitidez.
+    dpi: int = 150,
+    plotly_scale: int = 2,
+) -> str:
     """
     Convierte figuras Matplotlib o Plotly en data:image/png;base64.
-    Soporta ambos tipos de figura y devuelve una URI base64 lista para incrustar en HTML.
+    Ahora reescala la imagen final a un tamaño estándar manteniendo proporción.
     """
     import base64
     from io import BytesIO
+    from PIL import Image
 
     buf = BytesIO()
 
     try:
+        # 1) Render a PNG bytes en buffer
         # Caso 1: Matplotlib
         if hasattr(fig, "savefig"):
             fig.savefig(
                 buf,
                 format="png",
-                dpi=150,
+                dpi=dpi,
                 bbox_inches="tight",
                 facecolor="white",
                 edgecolor="white"
             )
+            png_bytes = buf.getvalue()
 
         # Caso 2: Plotly
-        elif hasattr(fig, "to_image"):  # preferido sobre write_image
-            img_bytes = fig.to_image(format="png", scale=2)
-            buf.write(img_bytes)
-            buf.seek(0)
+        elif hasattr(fig, "to_image"):  # preferido
+            png_bytes = fig.to_image(format="png", scale=plotly_scale)
+
         elif hasattr(fig, "write_image"):  # compatibilidad vieja
             fig.write_image(buf, format="png", engine="kaleido")
+            png_bytes = buf.getvalue()
 
         else:
             raise TypeError(f"Tipo de figura no soportado: {type(fig)}")
 
+        # 2) Reescalar con PIL (manteniendo proporción)
+        img = Image.open(BytesIO(png_bytes))
+        img = rescale_image(img, max_width=max_width, max_height=max_height)
+
+        out = BytesIO()
+        img.save(out, format="PNG", optimize=True)
+        out.seek(0)
+
+        # 3) Base64 final
+        b64 = base64.b64encode(out.read()).decode("ascii")
+        return f"data:image/png;base64,{b64}"
+
     except Exception as e:
-        # Devuelve un texto codificado si algo falla (útil para depurar)
         msg = f"error:{str(e)}"
         return f"data:text/plain;base64,{base64.b64encode(msg.encode()).decode()}"
-
-    buf.seek(0)
-    b64 = base64.b64encode(buf.read()).decode("ascii")
-    return f"data:image/png;base64,{b64}"
-
 
 
 
