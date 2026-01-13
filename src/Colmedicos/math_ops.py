@@ -30,6 +30,13 @@ _DATETIME_COERCION_CACHE = {}
 _STRING_COERCION_CACHE = {}
 
 
+_ALLOWED_OPS = {
+    '>', '<', '==', '!=', '>=', '<=',
+    'in', 'not in',
+    'contains', 'icontains', 'startswith', 'endswith', 'like', 'regex',
+    'between', 'between_open',
+}
+
 _OPS = {
     '>': operator.gt,
     '<': operator.lt,
@@ -239,22 +246,22 @@ def distinct_count_by(
 
 
 # --- Operadores soportados ---
-_OPS = {
-    '>': operator.gt,
-    '<': operator.lt,
-    '==': operator.eq,
-    '!=': operator.ne,
-    '>=': operator.ge,
-    '<=': operator.le,
-    'in':  lambda a, b: a.isin(b),
-    'not in': lambda a, b: ~a.isin(b),
+# _OPS = {
+#     '>': operator.gt,
+#     '<': operator.lt,
+#     '==': operator.eq,
+#     '!=': operator.ne,
+#     '>=': operator.ge,
+#     '<=': operator.le,
+#     'in':  lambda a, b: a.isin(b),
+#     'not in': lambda a, b: ~a.isin(b),
 
-    # Nuevos
-    'between': lambda a, rng: (pd.to_numeric(a, errors='coerce') >= rng[0]) & (pd.to_numeric(a, errors='coerce') <= rng[1]),
-    'between_open': lambda a, rng: (pd.to_numeric(a, errors='coerce') > rng[0]) & (pd.to_numeric(a, errors='coerce') < rng[1]),
-    'contains': lambda a, s: a.astype('string').str.contains(s, case=False, na=False),
-    'regex': lambda a, pat: a.astype('string').str.contains(pat, regex=True, na=False),
-}
+#     # Nuevos
+#     'between': lambda a, rng: (pd.to_numeric(a, errors='coerce') >= rng[0]) & (pd.to_numeric(a, errors='coerce') <= rng[1]),
+#     'between_open': lambda a, rng: (pd.to_numeric(a, errors='coerce') > rng[0]) & (pd.to_numeric(a, errors='coerce') < rng[1]),
+#     'contains': lambda a, s: a.astype('string').str.contains(s, case=False, na=False),
+#     'regex': lambda a, pat: a.astype('string').str.contains(pat, regex=True, na=False),
+# }
 
 def _coerce_condition_value(series: pd.Series, op: str, val: Any):
     """
@@ -476,7 +483,7 @@ def _mask_from_conditions(df: pd.DataFrame, condiciones: List[List[Any]], logic:
     for col, op, val in condiciones:
         if col not in df.columns:
             raise ValueError(f"Columna en condición no existe: {col}")
-        if op not in _NUMERIC_OPS.union(_SET_OPS):
+        if op not in _ALLOWED_OPS:
             raise ValueError(f"Operador no soportado: {op}")
 
         s0 = df[col]
@@ -745,8 +752,40 @@ def ejecutar_operaciones_condicionales(
         if g not in df.columns:
             raise ValueError(f"Columna de group_by no existe: {g}")
 
+    # ✅ NUEVO: PREFILTRO GLOBAL ANTES DEL GROUPBY
+    def _spec_has_conditions(s: dict) -> bool:
+        return bool(s.get("conditions") or s.get("conditions_all") or s.get("conditions_any") or s.get("condition_groups"))
+
+    prefilter_specs = []
+    for op_spec in operations:
+        if op_spec.get("op") == "ratio":
+            # ratio tiene numerator/denominator con conditions
+            if _spec_has_conditions(op_spec.get("numerator", {})) or _spec_has_conditions(op_spec.get("denominator", {})):
+                prefilter_specs.append(op_spec)
+        else:
+            if _spec_has_conditions(op_spec):
+                prefilter_specs.append(op_spec)
+
+    if prefilter_specs:
+        m_pref = pd.Series(False, index=df.index)
+        for op_spec in prefilter_specs:
+            if op_spec.get("op") == "ratio":
+                m_pref |= _resolve_mask(df, op_spec["numerator"])
+                m_pref |= _resolve_mask(df, op_spec["denominator"])
+            else:
+                m_pref |= _resolve_mask(df, op_spec)
+
+        df_group = df.loc[m_pref].copy()
+    else:
+        df_group = df
+
+    # Si quedó vacío, devuelve DF vacío con columnas esperadas
+    if df_group.empty:
+        cols = list(group_by) + [op.get("alias", op.get("op", "result")) for op in operations]
+        return pd.DataFrame(columns=cols)
+
     filas = []
-    for gkey, gdf in df.groupby(group_by, dropna=False):
+    for gkey, gdf in df_group.groupby(group_by, dropna=False):
         fila = {}
         if isinstance(gkey, tuple):
             for col, val in zip(group_by, gkey):
@@ -757,5 +796,7 @@ def ejecutar_operaciones_condicionales(
         for op_spec in operations:
             alias, val = _apply_ops(gdf, op_spec)
             fila[alias] = val
+
         filas.append(fila)
+
     return pd.DataFrame(filas)

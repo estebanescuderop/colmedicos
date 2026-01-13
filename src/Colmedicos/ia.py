@@ -11,6 +11,7 @@ import plotly.express as px
 from Colmedicos.registry import register
 from Colmedicos.config import OPENAI_API_KEY
 
+
 API_KEY = "API"
 API_KEY2 = "API"
 API_KEY3 = "API"
@@ -1213,15 +1214,17 @@ Deben conservarse SOLO si realmente incluyen datos válidos.
 4.1 UN APÉNDICE TIPO B SE CONSERVA SI:
 ================================================================
 
-- Contiene al menos un número distinto de 0 dentro de +...+  
+- Contiene al menos dentro de la información númerica descriptiva algun valor diferente de 0 dentro de +...+  
     Ejemplo: 1, 2, 0.3, 15%, etc.
-
+- La información generalmente se presenta en formato tabular o de lista numerada. (ejemplo: Prueba   Resultado personas_unicas\n                                     Alcohol      Normal               0\n                                 Anfetaminas      Normal               0\n                             Benzodiacepinas      Normal               0\n                       Blastocistis Hoiminis      Normal               0\n                                     Cocaina      Normal               0\n                                     Cocaina   Realizado               0\n                            Colesterol Total    Alterado               0\n                            Colesterol Total No Aplicado               0\n                            Colesterol Total      Normal               0\n                                  Creatinina      Normal               1\n                                   Cristales )
+- Los datos numéricos no son todos 0.
 O si:
 - Contiene porcentajes, proporciones o métricas.
 - Contiene conteos o cálculos válidos.
 - Se presentan distribuciones que no son error.
 - Se muestra una tabla o resultado con valores diferentes a cero.
 
+SI EXISTE AL MENOS UN VALOR VÁLIDO → **CONSERVAR**
 ================================================================
 4.2 UN APÉNDICE TIPO B SE BORRA SOLO SI CUMPLE ALGUNA:
 ================================================================
