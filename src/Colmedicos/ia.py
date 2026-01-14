@@ -345,6 +345,8 @@ U. Reglas específicas para gráficas de pirámide:
 
 V. Siempre que pidan de forma explicita graficar tabla, envia el parametro "render": "html", en el caso de gráficas de barras, barras horizontales, tortas o pirámides, envia "render": "imagen".
 
+X. Si de forma explicita se pide que una columna sea igual a un valor especifico, diferenciar SIEMPRE entre mayúsculas y minúsculas.
+
  ESQUEMA DE SALIDA (params)
  - Devolver exclusivamente los parametros indicados en este esquema, no devolver nada por fuera de esta estructura, no inventes columnas a menos que estén explicitamente indicadas en {COLUMNAS_JSON}.
 {
@@ -975,11 +977,51 @@ REGLAS GENERALES (se mantienen TODAS tus reglas originales):
 
    d) La salida por cada registro ES UN SOLO VALOR.
 
+   e) Para una tarea con varias columnas de registro, has uso de toda la información de las columnas indicadas en "registro_cols".
+
 3) NO OMITAS REGISTROS.
 4) NO CAMBIES EL ORDEN DE LOS REGISTROS.
 5) NO AGREGUES texto adicional fuera del JSON.
 6) NO OMÍTAS tareas. Cada tarea debe generar su propia columna.
 7) Para cada tarea, genera un resultado por cada registro.
+
+CAPACIDAD ADICIONAL: SCORING POR FACTORES
+
+Si dentro de "criterios" existe una clave llamada "factores" y otra llamada "conteo", debes ejecutar un procedimiento adicional OBLIGATORIO:
+
+Debes ejecutar el siguiente procedimiento OBLIGATORIO para cada registro:
+
+1) Evaluación de factores:
+   - Evalúa CADA factor definido en "factores".
+   - Cada factor tiene una condición lógica explícita.
+   - El resultado de cada factor es TRUE o FALSE.
+   - Si una condición no puede evaluarse por datos faltantes o inválidos,
+     el factor se considera FALSE.
+
+2) Conteo:
+   - Cuenta cuántos factores resultaron TRUE.
+   - Guarda este número como "conteo_factores".
+
+3) Clasificación final:
+   - Evalúa las reglas posteriores de clasificación.
+   - TODAS las demás claves de "criterios" (excepto "factores")
+   - Usa el valor de "conteo_factores".
+   - Devuelve la etiqueta del PRIMER criterio que aplique.
+
+4) Restricciones:
+   - No infieras factores.
+   - No reinterpretar condiciones.
+   - No asumas valores.
+   - No modifiques las reglas.
+
+5) El flujo OBLIGATORIO es:
+   a) Evaluar TODOS los factores.
+   b) Calcular conteo_factores.
+   c) Evaluar las reglas restantes de "criterios" usando EXCLUSIVAMENTE
+      conteo_factores.
+
+6) La salida por registro sigue siendo UN SOLO VALOR
+   correspondiente a la columna de salida de la tarea.
 
 FORMATO DE RESPUESTA ESPERADO (OBLIGATORIO):
 

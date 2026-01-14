@@ -85,12 +85,12 @@ tareas = [
 
     {
       "criterios": { 
-        "factores": "1. 'imc' igual o superior a 25, 2. 'presion' elevadas (>130/80mmHg), 3. 'talla' de 'genero' hombres por encima de >102cm o 'talla' del 'genero' mujeres por encima de >88cm.",
-        "Riesgo Bajo": "Se usa si no hay ningún factor presente...",
-        "Riesgo Moderado": "Se usa si se existe al menos 1 factor...",
-        "Riesgo Alto": "Se usa si se cumplen 2 o más factores..."
+        "factores": [{"nombre": "imc_alto", "condicion": "imc >= 25"},{"nombre": "presion_alta", "condicion": "presion > 130/80"},{"nombre": "talla_riesgo","condicion": "(genero == 'H' AND cintura > 102) OR (genero == 'M' AND cintura > 88)"}],
+        "Riesgo Bajo": "Se usa si conteo_factores == 0",
+        "Riesgo Moderado": "Se usa si conteo_factores == 1",
+        "Riesgo Alto": "Se usa si se conteo_factores >= 2"
       },
-      "registro_cols": ["talla", "imc", "presion", "genero"],
+      "registro_cols": ["cintura", "imc", "presion", "genero"],
       "nueva_columna": "tipo_riesgo_cardiovascular"
     },
 
