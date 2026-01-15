@@ -777,7 +777,7 @@ def process_plot_blocks(
     texto: str,
     *,
     batch_size: int = 6,
-    max_workers: int = 4,
+    max_workers: int = 2,
     debug: bool = False,
 ):
     """

@@ -1553,7 +1553,6 @@ def graficar_tabla(
 
     # Ajustar layout para minimizar espacios en blanco sin deformar la tabla
     #fig.tight_layout(pad=0.5)
-    print(fig)
     return fig, ax
 
 
@@ -1984,7 +1983,7 @@ def _finalize_layout(fig, ax, *, legend_outside=True):
     """Ajuste seguro de layout sin cambiar el estilo del gráfico."""
     if legend_outside and ax.get_legend() is not None:
         ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), borderaxespad=0.)
-    plt.tight_layout()
+    fig.tight_layout()
 
 
 
@@ -2255,21 +2254,29 @@ def plot_from_params(df: pd.DataFrame, params: Dict[str, Any], *, show: bool = F
     safe_kwargs["conditions_any"] = None
     safe_kwargs["unique_by"] = None
 
-    # Llamado real a la función de gráfico
-    fig, ax = func(df_filtered, **safe_kwargs)
-
-
-    # ---- Config específica de RENDER HTML ----
+    # -------------------------------------------------
+    # 10. RUTA ESPECIAL: TABLA render=html (NO crear fig Matplotlib primero)
+    # -------------------------------------------------
     render_mode = str(p.get("render", "")).strip().lower()
+
     if func is graficar_tabla and render_mode == "html":
-        # Nota: aquí sí pasamos titulo si lo quieres; hoy lo dejas ""
-        html_table = graficar_tabla_html(df_filtered, **safe_kwargs,max_width_px=1800)
-        png = html_to_png_bytes(html_table, selector="#tabla_datos__wrap", device_scale_factor=4.5)
+        html_table = graficar_tabla_html(
+            df_filtered,
+            **safe_kwargs,
+            max_width_px=1800
+        )
+        png = html_to_png_bytes(
+            html_table,
+            selector="#tabla_datos__wrap",
+            device_scale_factor=2.5
+        )
         fig, ax = png_bytes_to_figure(png)
         return fig, ax
-        # En vez de (fig, ax) devuelves un "resultado" que tu pipeline debe saber insertar.
-        # Si tu pipeline solo acepta fig/ax hoy, entonces crea un segundo router o una ruta paralela.
-        #return html_table, None
+
+    # -------------------------------------------------
+    # 11. Llamado normal (todas las demás rutas)
+    # -------------------------------------------------
+    fig, ax = func(df_filtered, **safe_kwargs)
 
     # -------------------------------------------------
     # 11. POST-FORMATEO: wrapping de labels, leyenda, etc.
@@ -2333,8 +2340,8 @@ def plot_from_params(df: pd.DataFrame, params: Dict[str, Any], *, show: bool = F
     _finalize_layout(fig, ax, legend_outside=legend_out)
 
     if show:
-        plt.tight_layout()
-        plt.show()
+        fig.tight_layout()
+        fig.show()
     return fig, ax
 
 
@@ -2857,6 +2864,8 @@ def _render_table_html(
 import asyncio
 from playwright.async_api import async_playwright
 import math
+
+
 async def _html_to_png_bytes_async(
     html: str,
     *,
@@ -2867,71 +2876,137 @@ async def _html_to_png_bytes_async(
     background: str = "white",
     viewport_width: int | None = None,
     viewport_height: int | None = None,
-    max_viewport_w: int = 9000,
-    max_viewport_h: int = 9000,
+    max_viewport_w: int = 4500,   # ⬅ límite REALISTA (antes 9000)
+    max_viewport_h: int = 4500,   # ⬅ límite REALISTA (antes 9000)
+    timeout_ms: int = 30_000,
     **_ignore_kwargs,
 ) -> bytes:
+    """
+    Versión robusta y memory-safe:
+    - Cierre garantizado de page y browser
+    - Viewports acotados para evitar OOM
+    - Mantiene medición real del DOM
+    """
+
+    from playwright.async_api import async_playwright
+
     async with async_playwright() as p:
-        browser = await p.chromium.launch()
-        vw0 = int(viewport_width or 1800)
-        vh0 = int(viewport_height or 1200)
+        browser = None
+        page = None
 
-        page = await browser.new_page(
-            device_scale_factor=device_scale_factor,
-            viewport={"width": vw0, "height": vh0},
-        )
+        try:
+            browser = await p.chromium.launch(
+                headless=True,
+                args=[
+                    "--disable-dev-shm-usage",
+                    "--no-sandbox",
+                    "--disable-gpu",
+                ],
+            )
 
-        full_html = f"""
-        <html>
-          <head>
-            <meta charset="utf-8" />
-            <style>
-              html, body {{
-                margin: 0; padding: 0;
-                background: {background};
-              }}
-            </style>
-          </head>
-          <body>
-            <div style="padding:{padding_px}px;">
-              {html}
-            </div>
-          </body>
-        </html>
-        """
+            # Viewport inicial conservador
+            vw0 = int(viewport_width or 1600)
+            vh0 = int(viewport_height or 1000)
 
-        await page.set_content(full_html, wait_until="networkidle")
-        if wait_ms:
-            await page.wait_for_timeout(wait_ms)
+            page = await browser.new_page(
+                device_scale_factor=device_scale_factor,
+                viewport={
+                    "width": min(vw0, max_viewport_w),
+                    "height": min(vh0, max_viewport_h),
+                },
+            )
 
-        loc = page.locator(selector)
-        if await loc.count() == 0:
-            await browser.close()
-            raise ValueError(f"No se encontró el selector {selector}. Revisa el id en el HTML generado.")
+            full_html = f"""
+            <html>
+              <head>
+                <meta charset="utf-8" />
+                <style>
+                  html, body {{
+                    margin: 0;
+                    padding: 0;
+                    background: {background};
+                  }}
+                </style>
+              </head>
+              <body>
+                <div style="padding:{padding_px}px;">
+                  {html}
+                </div>
+              </body>
+            </html>
+            """
 
-        # ✅ medir tamaño real del elemento (wrapper) para evitar recortes
-        dims = await page.evaluate(
-            """(sel) => {
-                const el = document.querySelector(sel);
-                if (!el) return null;
-                const r = el.getBoundingClientRect();
-                const w = Math.ceil(Math.max(el.scrollWidth, el.offsetWidth, el.clientWidth, r.width));
-                const h = Math.ceil(Math.max(el.scrollHeight, el.offsetHeight, el.clientHeight, r.height));
-                return { w, h };
-            }""",
-            selector
-        )
+            await page.set_content(
+                full_html,
+                wait_until="networkidle",
+                timeout=timeout_ms,
+            )
 
-        if dims:
-            vw = min(max_viewport_w, int(dims["w"] + padding_px * 2 + 40))
-            vh = min(max_viewport_h, int(dims["h"] + padding_px * 2 + 40))
-            await page.set_viewport_size({"width": max(800, vw), "height": max(600, vh)})
-            await page.wait_for_timeout(30)
+            if wait_ms:
+                await page.wait_for_timeout(wait_ms)
 
-        png = await loc.screenshot(type="png")
-        await browser.close()
-        return png
+            loc = page.locator(selector)
+            if await loc.count() == 0:
+                raise ValueError(
+                    f"No se encontró el selector {selector}. Revisa el id en el HTML generado."
+                )
 
+            # ✅ Medir tamaño REAL del elemento
+            dims = await page.evaluate(
+                """(sel) => {
+                    const el = document.querySelector(sel);
+                    if (!el) return null;
+                    const r = el.getBoundingClientRect();
+                    const w = Math.ceil(Math.max(
+                        el.scrollWidth,
+                        el.offsetWidth,
+                        el.clientWidth,
+                        r.width
+                    ));
+                    const h = Math.ceil(Math.max(
+                        el.scrollHeight,
+                        el.offsetHeight,
+                        el.clientHeight,
+                        r.height
+                    ));
+                    return { w, h };
+                }""",
+                selector
+            )
+
+            if dims:
+                vw = min(
+                    max_viewport_w,
+                    int(dims["w"] + padding_px * 2 + 40)
+                )
+                vh = min(
+                    max_viewport_h,
+                    int(dims["h"] + padding_px * 2 + 40)
+                )
+
+                await page.set_viewport_size({
+                    "width": max(800, vw),
+                    "height": max(600, vh),
+                })
+
+                await page.wait_for_timeout(30)
+
+            png = await loc.screenshot(type="png")
+            return png
+
+        finally:
+            # 🔒 CIERRE GARANTIZADO (CLAVE PARA EVITAR SIGKILL)
+            try:
+                if page is not None:
+                    await page.close()
+            except Exception:
+                pass
+
+            try:
+                if browser is not None:
+                    await browser.close()
+            except Exception:
+                pass
 
 def html_to_png_bytes(
     html: str,
