@@ -1480,6 +1480,8 @@ def exportar_output_a_html(
     border-left:4px solid var(--accent);
     padding:12px 14px;
     margin:16px 0;
+    text-align: justify;              /* ✅ fuerza justificado dentro del bloque */
+    text-justify: inter-word;
   }
 
   /* Tabla de contenido */
@@ -2410,6 +2412,43 @@ def remover_contenedores_apendice(html: str) -> str:
 import pandas as pd
 from typing import Dict, List, Tuple, Optional
 
+
+import unicodedata
+import pandas as pd
+
+def _normalizar_texto_base(valor: object) -> str:
+    if valor is None or (isinstance(valor, float) and pd.isna(valor)):
+        return ""
+    texto = str(valor).strip()
+    if not texto:
+        return ""
+    # quitar tildes / diacríticos
+    texto = unicodedata.normalize("NFKD", texto)
+    texto = "".join(c for c in texto if not unicodedata.combining(c))
+    # Normal -> "Normal"
+    texto = texto.lower()
+    return texto.capitalize()
+
+def normalizar_columna(
+    df: pd.DataFrame,
+    col: str,
+    *,
+    output_col: str | None = None,
+    copy: bool = True
+) -> pd.DataFrame:
+    """
+    Retorna un DataFrame con la columna normalizada.
+    - Si output_col es None: reemplaza df[col]
+    - Si output_col tiene valor: crea df[output_col]
+    - copy=True: no muta el df original
+    """
+    if col not in df.columns:
+        raise ValueError(f"La columna '{col}' no existe en el DataFrame. Columnas: {list(df.columns)}")
+
+    out = df.copy() if copy else df
+    target_col = output_col or col
+    out[target_col] = out[col].apply(_normalizar_texto_base)
+    return out
 
 
 def reemplazar_textos(

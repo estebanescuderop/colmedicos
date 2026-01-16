@@ -12,7 +12,7 @@ otra_ruta = r"C:\Users\EstebanEscuderoPuert\Downloads\muestra_plantilla.xlsx"
 # Ruta del archivo Excel
 ruta_archivo = r"C:\Users\EstebanEscuderoPuert\Downloads\Plantilla.xlsx"
 # Lee el archivo Excel (por defecto lee la primera hoja)
-df = pd.read_excel(otra_ruta)
+df = pd.read_excel(ruta_archivo)
 
 ctx = {
     "nombre_cliente": "TCC S.A.S.",
@@ -22,7 +22,7 @@ ctx = {
     "numero_personas": 51,
 }
 # Ruta del archivo Excel
-ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\prueba 250 1.xlsx"
+ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\prueba 4.xlsx"
 df_datos = pd.read_excel(ruta_archivos)
 maes_cie10 = r"C:\Users\EstebanEscuderoPuert\Downloads\cie10_maestro_limpio.xlsx"
 df_maestro = pd.read_excel(maes_cie10)
@@ -417,10 +417,11 @@ import json
 #    f.write(df_datos)
 
 
-ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\output_.xlsx"
-df_datos = pd.read_excel(ruta_archivos)
+# ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\output_.xlsx"
+# df_datos = pd.read_excel(ruta_archivos)
 
-
+# from Colmedicos.io_utils_remaster import normalizar_columna
+# df_datos = normalizar_columna(df_datos, "Resultado")
 textico = """Se presenta la distribución de los diagnosticos identificados durante las valoraciones medico-ocupacionales, agrupados por sistemas organicos
 
   # Gráfica de tabla llamado 'Diagnostico por sistema' con un conteo de registros únicos por columna de identificación con base a la columna de grupo#
@@ -446,16 +447,94 @@ En todos los casos donde se identifico algun hallazgo clinico relevante, el medi
 
 # params = first["params"] if "params" in first else first
 # print(params)
-# variable  = """{'chart_type': 'tabla', 'function_name': 'graficar_tabla', 'title': 'Diagnostico por sistema', 'xlabel': 'Grupo', 'y': 'documento', 'agg': 'distinct_count', 'distinct_on': 'documento', 'drop_dupes_before_sum': False, 'unique_by': None, 'conditions_all': [], 'conditions_any': [], 'binning': None, 'stack_columns': None, 'color': None, 'colors_by_category': None, 'legend_col': None, 'show_legend': False, 'show_values': None, 'sort': None, 'limit_categories': None, 'needs_disambiguation': False, 'candidates': {'xlabel': [], 'y': []}, 'percentage_of': None, 'percentage_colname': None, 'extra_measures': None, 'hide_main_measure': None, 'add_total_row': False, 'add_total_column': False}"""
+variable  = """{
+      "chart_type": "barras_horizontal",
+      "function_name": "graficar_barras_horizontal",
+      "title": "Pruebas infecciosas",
+      "render": "imagen",
+      "xlabel": "Prueba",
+      "y": "documento",
+      "agg": "distinct_count",
+      "distinct_on": "documento",
+      "drop_dupes_before_sum": false,
+      "unique_by": null,
+      "conditions_all": [
+        [
+          "Tipo prueba",
+          "startswith",
+          "Pruebas infec"
+        ]
+      ],
+      "conditions_any": [],
+      "binning": null,
+      "stack_columns": null,
+      "color": null,
+      "colors_by_category": null,
+      "legend_col": "Resultado",
+      "show_legend": true,
+      "show_values": null,
+      "sort": null,
+      "limit_categories": null,
+      "needs_disambiguation": false,
+      "candidates": {
+        "xlabel": [],
+        "y": []
+      },
+      "percentage_of": null,
+      "percentage_colname": null,
+      "extra_measures": null,
+      "hide_main_measure": null,
+      "add_total_row": false,
+      "add_total_column": false
+    }"""
 # variable2 = params
 
 #variable2 = [{'chart_type': 'tabla', 'function_name': 'graficar_tabla', 'title': 'Tipo de riesgo', 'render': 'html', 'xlabel': 'categoria_cargo', 'y': 'documento', 'agg': 'distinct_count', 'distinct_on': 'documento', 'drop_dupes_before_sum': False, 'unique_by': None, 'conditions_all': [], 'conditions_any': [], 'binning': None, 'stack_columns': None, 'color': None, 'colors_by_category': None, 'legend_col': None, 'show_legend': None, 'show_values': None, 'sort': None, 'limit_categories': None, 'needs_disambiguation': False, 'candidates': {'xlabel': [], 'y': []}, 'percentage_of': None, 'percentage_colname': None, 'extra_measures': [{'name': 'Riesgo ergonomico', 'conditions_all': [['riesgo_ergonomico', '==', 'Si']], 'conditions_any': [], 'agg': 'distinct_count', 'distinct_on': 'documento', 'drop_dupes_before_sum': False}, {'name': 'Riesgo quimico', 'conditions_all': [['riesgo_quimico', '==', 'Si']], 'conditions_any': [], 'agg': 'distinct_count', 'distinct_on': 'documento', 'drop_dupes_before_sum': False}, {'name': 'Riesgo psicosocial', 'conditions_all': [['riesgo_psicosocial', '==', 'Si']], 'conditions_any': [], 'agg': 'distinct_count', 'distinct_on': 'documento', 'drop_dupes_before_sum': False}, {'name': 'Riesgo biomecanico', 'conditions_all': [['riesgo_biomecanico', '==', 'Si']], 'conditions_any': [], 'agg': 'distinct_count', 'distinct_on': 'documento', 'drop_dupes_before_sum': False}], 'hide_main_measure': False, 'add_total_row': False, 'add_total_column': False}]
-# variable2 = [{'chart_type': 'tabla', 'function_name': 'graficar_tabla', 'title': 'Diagnostico por sistema', 'render': 'html', 'xlabel': 'Grupo', 'y': 'documento', 'agg': 'distinct_count', 'distinct_on': 'documento', 'drop_dupes_before_sum': False, 'unique_by': None, 'conditions_all': [], 'conditions_any': [], 'binning': None, 'stack_columns': None, 'color': None, 'colors_by_category': None, 'legend_col': None, 'show_legend': False, 'show_values': None, 'sort': None, 'limit_categories': None, 'needs_disambiguation': False, 'candidates': {'xlabel': [], 'y': []}, 'percentage_of': None, 'percentage_colname': None, 'extra_measures': None, 'hide_main_measure': None, 'add_total_row': False, 'add_total_column': False}]
+variable2 = [{
+      "chart_type": "barras_horizontal",
+      "function_name": "graficar_barras_horizontal",
+      "title": "Pruebas infecciosas",
+      "render": "imagen",
+      "xlabel": "Prueba",
+      "y": "documento",
+      "agg": "distinct_count",
+      "distinct_on": "documento",
+      "drop_dupes_before_sum": None,
+      "unique_by": None,
+      "conditions_all": [
+        [
+          "Tipo prueba",
+          "startswith",
+          "Pruebas infec"
+        ]
+      ],
+      "conditions_any": [],
+      "binning": None,
+      "stack_columns": None,
+      "color": None,
+      "colors_by_category": None,
+      "legend_col": "Resultado",
+      "show_legend": True,
+      "show_values": None,
+      "sort": None,
+      "limit_categories": None,
+      "needs_disambiguation": False,
+      "candidates": {
+        "xlabel": [],
+        "y": []
+      },
+      "percentage_of": None,
+      "percentage_colname": None,
+      "extra_measures": None,
+      "hide_main_measure": None,
+      "add_total_row": False,
+      "add_total_column": False
+    }]
 # fig, ax = plot_from_params(df_datos,variable2[0])
-# print(fig)
+# # print(fig)
 
 # out = _fig_to_data_uri(fig)
-# #print(out)
+# print(out)
 
 # with open(r"C:\Users\EstebanEscuderoPuert\Downloads\output_.txt", "w", encoding="utf-8") as f:
 #   f.write(out)

@@ -37,6 +37,10 @@ _OPS = {
     "contains": lambda a, b: a.astype(str).str.contains(b, case=False, na=False),
     "startswith": lambda a, b: (a.astype(str).str.lower().str.startswith(str(b).lower(), na=False)),
     "endswith": lambda a, b: a.astype(str).str.endswith(b, na=False),
+    
+    # Insensible a tildes / normalización (versiones "i")
+    "istartswith": lambda a, b: a.astype(str).apply(lambda x: _normalize(x)).str.startswith(_normalize(b), na=False),
+    "iendswith": lambda a, b: a.astype(str).apply(lambda x: _normalize(x)).str.endswith(_normalize(b), na=False),
 
     # LIKE estilo SQL
     "like": lambda a, b: a.astype(str).str.contains(b.replace("%", ""), case=False, na=False),
@@ -973,8 +977,9 @@ def graficar_barras_horizontal(
         if limit_categories:
             df_plot = df_plot.head(limit_categories)
 
-        fig, ax = plt.subplots(figsize=(12, max(6, len(df_plot) * 0.4)), facecolor='white')
+        fig, ax = plt.subplots(figsize=(12, max(6, len(df_plot) * 0.65)), facecolor='white')
         ax.set_facecolor('#f8f9fa')
+        fig.subplots_adjust(left=0.35)
 
         colname = df_plot.columns[0]
 
@@ -2066,7 +2071,7 @@ def plot_from_params(df: pd.DataFrame, params: Dict[str, Any], *, show: bool = F
     tick_fontsize = int(p.get("tick_fontsize", 9))
     rotation      = p.get("rotation", 35)
     wrap_width_x  = int(p.get("wrap_width_x", 20))
-    wrap_width_y  = int(p.get("wrap_width_y", 30))
+    wrap_width_y  = int(p.get("wrap_width_y", 38))
     max_chars_x   = int(p.get("max_chars_x", 85))
     max_chars_y   = int(p.get("max_chars_y", 120))
     legend_out    = bool(p.get("legend_outside", True))
@@ -2794,11 +2799,11 @@ def _render_table_html(
   table#{table_id} td .cell {{
     display: -webkit-box;
     -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
+    -webkit-line-clamp: 3;
     overflow: hidden;
     white-space: normal;
     word-break: break-word;
-    max-width: 680px;
+    max-width: 780px;
   }}
 
   /* ✅ números: 1 sola línea */
