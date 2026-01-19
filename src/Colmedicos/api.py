@@ -2,7 +2,7 @@
 from Colmedicos.ia import ask_gpt5
 from Colmedicos.io_utils import generar_output, aplicar_data_por_tipo_desde_output, aplicar_ia_por_tipo, aplicar_plot_por_tipo_desde_output, exportar_output_a_html, mostrar_html, limpiar_output_dataframe
 from Colmedicos.registry import register
-from Colmedicos.io_utils_remaster import process_ia_blocks, process_data_blocks, process_plot_blocks, _render_vars_text, exportar_output_a_html, _fig_to_data_uri, _format_result_plain, columnas_a_texto,aplicar_multiples_columnas_gpt5, limpieza_final,  unpivot_df, dividir_columna_en_dos, procesar_codigos_cie10, unir_dataframes, expand_json_column, procesar_apendices, process_titulo_blocks, remover_contenedores_apendice, reemplazar_textos, crear_resultado_agregado, normalizar_columna
+from Colmedicos.io_utils_remaster import process_ia_blocks, process_data_blocks, process_plot_blocks, _render_vars_text, exportar_output_a_html, _fig_to_data_uri, _format_result_plain, columnas_a_texto,aplicar_multiples_columnas_gpt5, limpieza_final,  unpivot_df, dividir_columna_en_dos, procesar_codigos_cie10, unir_dataframes, expand_json_column, procesar_apendices, process_titulo_blocks, remover_contenedores_apendice, reemplazar_textos, crear_resultado_agregado, normalizar_columna, eliminar_duplicados_ultimo
 import pandas as pd
 
 # Colmedicos/api.py
@@ -11,11 +11,12 @@ import re
 import pandas as pd
 from typing import Any, Dict, List, Tuple, Union, Optional, Callable
 
+
 def informe_final(
     df: pd.DataFrame,
     df_datos: pd.DataFrame,
     ctx: dict,
-    tareas: List[Dict[str, Any]] = [],
+    tareas: Optional[List[Dict[str, Any]]] = None,
     salida_html: str = r"C:\Users\EstebanEscuderoPuert\Downloads\informe_final.html",
     escribir_archivo: bool = True,
     modo_rapido_plots: bool = True,
@@ -40,7 +41,7 @@ def informe_final(
     json_columna: str = None,
     campos_a_extraer: list = None,
     renombrar_campos: dict = None
-) -> Tuple[str, Dict[str, Any]]:
+) -> Tuple[str, Dict[str, Any], pd.DataFrame, str, str]:
     """
     Versión optimizada con:
       - early-exit por tokens
@@ -56,12 +57,18 @@ def informe_final(
     logs = []
     meta_detalle = {}
 
-
+    t67 = time.perf_counter()
+    df_out = eliminar_duplicados_ultimo(df_out, col_unica=["documento"])
+    meta_detalle["t_eliminar_duplicados"] = round(time.perf_counter() - t67, 4)
+    print("✔ Duplicados eliminados")                                         
     # Manipulacion columnas
+    if tareas is None:
+        tareas = []
     t10 = time.perf_counter()
     df_out = aplicar_multiples_columnas_gpt5(df_out, tareas)
     meta_detalle["t_manipulacion_columnas"] = round(time.perf_counter() - t10, 4)
     print("✔ Columnas creadas con éxito")
+
 
     # Expansión columna JSON
     if aplicar_expansion_json:
@@ -188,10 +195,6 @@ def informe_final(
         # Detectar tokens de cada módulo antes de llamar nada costoso
         hay_data = bool(_re_data.search(text))
         print(hay_data)
-        hay_ia   = bool(_re_ia.search(text))
-        print(hay_ia)
-        hay_plot = bool(_re_plot.search(text))
-        print(hay_plot)
 
         # 2) Data blocks (solo si hay ||...|| en el texto)
         if hay_data:
@@ -218,6 +221,8 @@ def informe_final(
                 logs.append(f"Generación de portada y TOC: ERROR → {e_port}")
                 meta_detalle["t_apendices"] = round(time.perf_counter() - t35, 4)
 
+        hay_ia   = bool(_re_ia.search(text_for_next))
+        print(hay_ia)
 
         # 3) IA blocks (solo si hay +IA_)
         if hay_ia:
@@ -230,7 +235,12 @@ def informe_final(
             logs.append("Análisis IA: SKIP (sin tokens)")
             # text_for_next se mantiene
                 # 3.5) Portada y tabla de contenido opcional
-       
+
+        
+        print("ANTES PLOT - tokens:", len(re.findall(r"#([^#]+)#", text_for_next)))
+
+        hay_plot = bool(_re_plot.search(text_for_next))
+        print(hay_plot)       
        
         # 4) Plot blocks (solo si hay #GRAFICA#)
         if hay_plot:

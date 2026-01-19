@@ -10,6 +10,45 @@ import json
 import plotly.express as px
 from Colmedicos.registry import register
 from Colmedicos.config import OPENAI_API_KEY
+# Colmedicos/llm_safe.py
+import threading
+import time
+import random
+
+# Limita cuántas llamadas simultáneas le haces al LLM en TODO el proceso
+LLM_SEMAPHORE = threading.Semaphore(3)  # ajusta 2-6 según tu server
+
+RETRIABLE_MARKERS = [
+    "429", "rate limit", "ratelimit",
+    "timeout", "timed out",
+    "503", "502", "bad gateway", "service unavailable",
+    "server error", "temporarily unavailable",
+    "connection reset", "connection aborted"
+]
+
+def call_llm_safe(fn, *args, max_retries: int = 6, base: float = 0.6, **kwargs):
+    """
+    Ejecuta una llamada al LLM con:
+    - semáforo global (concurrencia controlada)
+    - reintentos con backoff exponencial + jitter
+    """
+    for i in range(max_retries):
+        try:
+            with LLM_SEMAPHORE:
+                return fn(*args, **kwargs)
+
+        except Exception as e:
+            msg = str(e).lower()
+            retriable = any(m in msg for m in RETRIABLE_MARKERS)
+
+            # si no es error reintetable o se acabaron los intentos => revienta
+            if (not retriable) or (i == max_retries - 1):
+                raise
+
+            # backoff exponencial + jitter
+            wait = base * (2 ** i) + random.uniform(0, 0.35)
+            time.sleep(wait)
+
 
 
 API_KEY = "API"
@@ -68,14 +107,12 @@ SALIDA JSON ESPERADA
 Con base a la siguiente INSTRUCCIÓN: {INSTRUCCION}
  devuelve estrictamente la Salida JSON sin instrucciones o texto adicional.
 """
-client = openai.OpenAI(api_key=API_KEY)
-client1 = openai.OpenAI(api_key=API_KEY2)  
-client3 = openai.OpenAI(api_key=API_KEY3)  
 @register("ask_gpt5")
 def ask_gpt5(pregunta):
     """Envía un prompt y devuelve la respuesta de GPT-5."""
     instruc = json.dumps(pregunta, ensure_ascii=False)
-    respuesta = client1.chat.completions.create(
+    client_ask = openai.OpenAI(api_key=API_KEY2)
+    respuesta = call_llm_safe(client_ask.chat.completions.create,
         model="gpt-4.1",  # 👈 Aquí usas GPT-5 directamente
         messages=[
             {"role": "system", "content": rol},
@@ -270,7 +307,7 @@ Q. Definición del parámetro span (opcional, si la estructura lo incluye):
       - fin: indica la posición inmediatamente posterior al último carácter de esa misma instrucción.
   -Este rango permite referenciar con precisión el fragmento textual original que dio contexto a la instrucción del gráfico.
 
-R. Omite el texto que dice literalmente #GRAFICA#, ya que este es un valor previo a cada instrucción.
+R. Utiliza los mismos nombres de columnas que se encuentran en {COLUMNAS_JSON} para todos los parámetros que requieran especificar columnas del DataFrame, tales como xlabel, y, distinct_on, unique_by, conditions_all, conditions_any, binning.column, stack_columns.columns, stack_columns.output_col, stack_columns.value_col, entre otros. Asegúrate de respetar la capitalización, mayúsculas, minúsculas, caracteres y los espacios tal como aparecen en {COLUMNAS_JSON} para mantener la coherencia y evitar errores de referencia.
 
 S. Existen dos parametros que se usarán para gráficas de tabla cuando se pida explicitamente un porcentaje o proporción sobre el conteo o suma de una columna:
   - percentage_of: string | null
@@ -600,27 +637,53 @@ FIN. SOLO JSON.
 Ejecución: Con base en la siguiente {INSTRUCCION} y las columnas {COLUMNAS_JSON}, interpreta y devuelve los parámetros técnicos unicamente en el formato JSON de salida.
 """
 
-def _strip_code_fences(s: str) -> str:
-    s = s.strip()
+# Colmedicos/json_utils.py
+import json
+from typing import Any
+
+def strip_code_fences(s: str) -> str:
+    """
+    Remueve fences tipo:
+    ```json
+    {...}
+    ```
+    """
+    s = (s or "").strip()
     if s.startswith("```"):
-        # remove first fence line
-        s = s.split("```", 2)
-        if len(s) >= 3:
-            # s = ["", "json or lang", "body..."]
-            return s[2].strip()
-        return s[-1].strip()
+        # Remueve primera línea ```json o ```
+        lines = s.splitlines()
+        if len(lines) >= 2 and lines[0].startswith("```"):
+            # Busca la última línea con ```
+            if lines[-1].strip().startswith("```"):
+                body = "\n".join(lines[1:-1]).strip()
+                return body
+            # Si no hay fence de cierre, igual intenta retornar el resto
+            body = "\n".join(lines[1:]).strip()
+            return body
     return s
 
 def _json_loads_loose(s: str) -> Any:
-    s = _strip_code_fences(s)
+    """
+    Intenta parsear JSON de forma tolerante:
+    - quita fences
+    - recorta desde el primer { o [
+    - recorta hasta el último } o ]
+    """
+    s = strip_code_fences(s)
+
     try:
         return json.loads(s)
     except Exception:
-        # intento simple: localizar el primer '[' o '{' y recortar
-        first = min((i for i in [s.find("["), s.find("{")] if i != -1), default=-1)
+        first_candidates = [s.find("["), s.find("{")]
+        first_candidates = [i for i in first_candidates if i != -1]
+        first = min(first_candidates) if first_candidates else -1
+
         last = max(s.rfind("]"), s.rfind("}"))
+
         if first != -1 and last != -1 and last > first:
-            return json.loads(s[first:last+1])
+            candidate = s[first:last + 1]
+            return json.loads(candidate)
+
         raise
 
 @register("graficos_gpt5")
@@ -635,7 +698,8 @@ def graficos_gpt5(df, pregunta: Union[str, List[Dict[str, Any]]]) -> Union[Dict[
     payload_cols = json.dumps(columnas, ensure_ascii=False)
     instruccion_tipo = json.dumps(pregunta, ensure_ascii=False)
     subprompt = _MSJ_GRAFO_V2.replace("{COLUMNAS_JSON}", payload_cols).replace("{INSTRUCCION}", str(instruccion_tipo))
-    respuesta = client3.chat.completions.create(
+    client_grf = openai.OpenAI(api_key=API_KEY3)  
+    respuesta = call_llm_safe(client_grf.chat.completions.create,
     model="gpt-5",  # 👈 Aquí usas GPT-5 directamente
     messages=[
             {"role": "system", "content": "Eres un experto en análisis de datos y tu trabajo es interpretar textos y extraer las instrucciones precisas de acuerdo a las columnas de un dataframe"},
@@ -644,7 +708,7 @@ def graficos_gpt5(df, pregunta: Union[str, List[Dict[str, Any]]]) -> Union[Dict[
     )
 
     texto_respuesta = respuesta.choices[0].message.content
-
+    texto_respuesta = _json_loads_loose(texto_respuesta)
     return texto_respuesta
 
 
@@ -690,7 +754,7 @@ Nota: Unicamente procesa el texto dentro del parametro "prompt".
     - Si hay ambigüedad o no existe, deja el campo en null y marca `"needs_disambiguation": true`, proponiendo alternativas en `"candidates"`.
   -No repitas la lista de columnas dentro de cada objeto.
   - Si se trata de condiciones de filtro, omitelo y no diligencies, ejemplo: Si no encuentras la columna, no pongas null == "valor"
-  - Usa unicamente las columnas que estén en {COLUMNAS_JSON}. No inventes columnas nuevas. 
+  - Usa unicamente las columnas que estén en {COLUMNAS_JSON}. No inventes columnas nuevas. Utiliza exactamente los mismos nombres de columnas que se encuentran en {COLUMNAS_JSON} para todos los parámetros que requieran especificar columnas del DataFrame. Manten la misma estructura de mayúsculas, minúsculas, caracteres y los espacios tal como aparecen en {COLUMNAS_JSON} para mantener la coherencia y evitar errores de referencia.
   - Si la instrucción menciona un campo ambiguo ejemplo:(“tipo de prueba”, “resultado”), debes mapearlo estrictamente al más probable dentro de las columnas válidas.
 Nunca generes "column": null.
 
@@ -851,7 +915,8 @@ def operaciones_gpt5(df, pregunta):
     payload_cols = json.dumps(columnas, ensure_ascii=False)
     instruccion = json.dumps(pregunta, ensure_ascii=False)
     subprompt = (MSJ_OPS.replace("{COLUMNAS_JSON}", payload_cols).replace("{INSTRUCCION}", str(instruccion)))
-    respuesta = client1.chat.completions.create(
+    client_op = openai.OpenAI(api_key=API_KEY2) 
+    respuesta = call_llm_safe(client_op.chat.completions.create,
         model="gpt-5",  # 👈 Aquí usas GPT-5 directamente
         messages=[
             {"role": "system", "content": "Eres un analista que extrae parámetros para realizar calculos a partir de una instrucción en lenguaje natural y una lista de columnas disponibles de un DataFrame de pandas."},
@@ -860,7 +925,7 @@ def operaciones_gpt5(df, pregunta):
     )
 
     texto_respuesta = respuesta.choices[0].message.content
-    params = json.loads(texto_respuesta)
+    params = _json_loads_loose(texto_respuesta)
     return params
 
 
@@ -895,7 +960,8 @@ Con base en {Criterios} y el siguiente registro {Registro}, devuelve la etiqueta
 def columns_gpt5(criterios, registro):
     """Envía un prompt y devuelve la respuesta de GPT-5."""
     time.sleep(1)
-    respuesta = client.chat.completions.create(
+    client_col = openai.OpenAI(api_key=API_KEY)
+    respuesta = call_llm_safe(client_col.chat.completions.create,
         model="gpt-4.1-mini",  # 👈 Aquí usas GPT-5 directamente
         messages=[
             {"role": "system", "content": "Eres un asistente preciso y coherente con instrucciones de análisis de texto, especificamente hablando de temas relacionados con salud ocupacional."},
@@ -994,6 +1060,8 @@ Debes ejecutar el siguiente procedimiento OBLIGATORIO para cada registro:
 1) Evaluación de factores:
    - Evalúa CADA factor definido en "factores".
    - Cada factor tiene una condición lógica explícita.
+   - Si los datos en principio requieren una normalización (ejemplo: mayúsculas/minúsculas, espacios, formatos),
+     aplícala estrictamente.
    - El resultado de cada factor es TRUE o FALSE.
    - Si una condición no puede evaluarse por datos faltantes o inválidos,
      el factor se considera FALSE.
@@ -1011,6 +1079,7 @@ Debes ejecutar el siguiente procedimiento OBLIGATORIO para cada registro:
 4) Restricciones:
    - No infieras factores.
    - No reinterpretar condiciones.
+   - Convierte datos si es necesario para evaluar factores.
    - No asumas valores.
    - No modifiques las reglas.
 
@@ -1022,6 +1091,11 @@ Debes ejecutar el siguiente procedimiento OBLIGATORIO para cada registro:
 
 6) La salida por registro sigue siendo UN SOLO VALOR
    correspondiente a la columna de salida de la tarea.
+
+7) Para la recolección de conteo criterios se puede utilizar operadores lógicos cómo: AND, OR, NOT, >=, <=, >, <, ==, !=, contains, startswith, endswith, in, not in.
+
+8) Si hay columnas con información compuesta (ejemplo: 130/85 en presión arterial), No intentes descomponerla, sólo usa operadores que puedan aplicarse directamente cómo 'startswith' (ejemplo: startswith "130").
+ ================================================================
 
 FORMATO DE RESPUESTA ESPERADO (OBLIGATORIO):
 
@@ -1048,7 +1122,8 @@ No expliques nada. Devuelve únicamente el JSON.
 @register("columns_batch_gpt5")
 def columns_batch_gpt5(payload):
     """Envía un prompt y devuelve la respuesta de GPT-5."""
-    respuesta = client.chat.completions.create(
+    client_columns = openai.OpenAI(api_key=API_KEY3)  
+    respuesta = call_llm_safe(client_columns.chat.completions.create,
         model="gpt-4.1",  # 👈 Aquí usas GPT-5 directamente
         messages=[
             {"role": "system", "content": "Eres un asistente preciso y coherente con instrucciones de análisis de texto, especificamente hablando de temas relacionados con salud ocupacional."},
@@ -1179,12 +1254,13 @@ FIN.
 rol1 = """Eres un agente experto en documentación de salud ocupacional.
 Tu tarea es, a partir de una sola cadena de texto que recibirás como entrada, construir una salida JSON con unos titulos numerados"""
   
-@register("portada_gpt5")
+@register("titulos_gpt5")
 def titulos_gpt5(texto):
     """Envía un prompt y devuelve la respuesta de GPT-5."""
     texto = json.dumps(texto, ensure_ascii=False)
     subprompt = AG_TITULOS.replace("{titulos}", texto)
-    respuesta = client1.chat.completions.create(
+    client_titulos = openai.OpenAI(api_key=API_KEY)
+    respuesta = call_llm_safe(client_titulos.chat.completions.create,
         model="gpt-4.1",  # 👈 Aquí usas GPT-5 directamente
         messages=[
             {"role": "system", "content": rol1},
@@ -1193,7 +1269,7 @@ def titulos_gpt5(texto):
     )
 
     texto_respuesta = respuesta.choices[0].message.content
-    return texto_respuesta
+    return _json_loads_loose(texto_respuesta)
 
 AG_APENDICES = """Eres un agente experto en estructuración y depuración de documentos técnicos en salud ocupacional.
 Tu única misión es analizar un texto completo que contiene uno o varios bloques en formato:
@@ -1328,11 +1404,12 @@ rol2 = """Eres un agente experto en documentación de salud ocupacional.
 Tu tarea es, a partir de una sola cadena de texto que recibirás como entrada, construir JSON de salida válido"""
 
 
-@register("portada_gpt5")
+@register("apendices_gpt5")
 def apendices_gpt5(texto):
     """Envía un prompt y devuelve la respuesta de GPT-5."""
     subprompt = AG_APENDICES.replace("{texto}", texto)
-    respuesta = client1.chat.completions.create(
+    client_apend = openai.OpenAI(api_key=API_KEY)
+    respuesta = call_llm_safe(client_apend.chat.completions.create,
         model="gpt-4.1",  # 👈 Aquí usas GPT-5 directamente
         messages=[
             {"role": "system", "content": rol2},
@@ -1341,6 +1418,6 @@ def apendices_gpt5(texto):
     )
 
     texto_respuesta = respuesta.choices[0].message.content
-    return texto_respuesta
+    return _json_loads_loose(texto_respuesta)
 
 

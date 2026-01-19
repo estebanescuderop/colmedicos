@@ -1,4 +1,3 @@
-#from curses import raw
 from Colmedicos.registry import register
 
 # ===========================

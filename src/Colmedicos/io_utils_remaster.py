@@ -172,7 +172,7 @@ def aplicar_ia_en_texto(texto: str, resultados_ia, formato: str = "html") -> str
 
         # --- construir reemplazo ---
         if formato == "html":
-            rep = f'<div class="análisis_{idx}">{resultado_ia}</div>'
+            rep = f'<div class="análisis_{idx}"><p>{resultado_ia}</p></div>'
         else:
             rep = f"[IA bloque {idx}] {resultado_ia}"
 
@@ -601,16 +601,14 @@ def rescale_image(img, *, max_width: int = 1200, max_height: int = 800):
 def _fig_to_data_uri(
     fig,
     *,
-    # 👇 Tamaño estándar final (ajústalo a tu gusto)
-    max_width: int = 1200,
-    max_height: int = 800,
-    # 👇 Render inicial (antes de reescalar). Más dpi/scale = más nitidez.
+    max_width: int = 800,
+    max_height: int = 500,
     dpi: int = 150,
-    plotly_scale: int = 2,
+    plotly_scale: int = 1.5,
 ) -> str:
     """
     Convierte figuras Matplotlib o Plotly en data:image/png;base64.
-    Ahora reescala la imagen final a un tamaño estándar manteniendo proporción.
+    Reescala imagen final manteniendo proporción y CIERRA recursos.
     """
     import base64
     from io import BytesIO
@@ -619,46 +617,62 @@ def _fig_to_data_uri(
     buf = BytesIO()
 
     try:
-        # 1) Render a PNG bytes en buffer
-        # Caso 1: Matplotlib
-        if hasattr(fig, "savefig"):
+        # 1) Render a PNG bytes
+        if hasattr(fig, "savefig"):  # Matplotlib
             fig.savefig(
                 buf,
                 format="png",
                 dpi=dpi,
                 bbox_inches="tight",
                 facecolor="white",
-                edgecolor="white"
+                edgecolor="white",
             )
             png_bytes = buf.getvalue()
 
-        # Caso 2: Plotly
-        elif hasattr(fig, "to_image"):  # preferido
+        elif hasattr(fig, "to_image"):  # Plotly (kaleido)
             png_bytes = fig.to_image(format="png", scale=plotly_scale)
 
-        elif hasattr(fig, "write_image"):  # compatibilidad vieja
+        elif hasattr(fig, "write_image"):  # Plotly compat
             fig.write_image(buf, format="png", engine="kaleido")
             png_bytes = buf.getvalue()
 
         else:
             raise TypeError(f"Tipo de figura no soportado: {type(fig)}")
 
-        # 2) Reescalar con PIL (manteniendo proporción)
+        # 2) Reescalar con PIL
         img = Image.open(BytesIO(png_bytes))
-        img = rescale_image(img, max_width=max_width, max_height=max_height)
+        try:
+            img = rescale_image(img, max_width=max_width, max_height=max_height)
 
-        out = BytesIO()
-        img.save(out, format="PNG", optimize=True)
-        out.seek(0)
+            out = BytesIO()
+            try:
+                img.save(out, format="PNG", optimize=True)
+                out.seek(0)
 
-        # 3) Base64 final
-        b64 = base64.b64encode(out.read()).decode("ascii")
-        return f"data:image/png;base64,{b64}"
+                b64 = base64.b64encode(out.read()).decode("ascii")
+                return f"data:image/png;base64,{b64}"
+
+            finally:
+                out.close()
+
+        finally:
+            img.close()
 
     except Exception as e:
         msg = f"error:{str(e)}"
         return f"data:text/plain;base64,{base64.b64encode(msg.encode()).decode()}"
 
+    finally:
+        # ✅ Cerrar buffer principal siempre
+        buf.close()
+
+        # ✅ Matplotlib: cerrar figura (EVITA fuga de RAM)
+        if hasattr(fig, "savefig"):
+            try:
+                import matplotlib.pyplot as plt
+                plt.close(fig)
+            except Exception:
+                pass
 
 
 def aplicar_graficos_en_texto(texto: str, resultados_graficos, formato: str = "html") -> str:
@@ -772,6 +786,90 @@ def _json_loads_loose(s: str) -> Any:
         raise
 
 
+def _fig_is_empty(fig) -> bool:
+    """
+    Determina si una figura salió 'vacía' (sin data visible).
+    Soporta Matplotlib y Plotly de forma simple.
+    """
+    if fig is None:
+        return True
+
+    # Matplotlib
+    if hasattr(fig, "axes"):
+        if not fig.axes:
+            return True
+        # si ninguna axis tiene data, asumimos vacío
+        has_any_data = False
+        for ax in fig.axes:
+            try:
+                if ax.has_data():
+                    has_any_data = True
+                    break
+            except Exception:
+                pass
+        return not has_any_data
+
+    # Plotly
+    if hasattr(fig, "data"):
+        try:
+            return len(fig.data) == 0
+        except Exception:
+            return True
+
+    # Si no sabemos identificarlo, asumimos NO vacío
+    return False
+
+
+def validar_params_grafica_por_ejecucion(df, params: dict) -> tuple[bool, str]:
+    """
+    Valida ejecutando el graficador real.
+    Si falla o queda vacío, devuelve (False, motivo).
+    """
+    try:
+        fig_ax = plot_from_params(df, params)
+
+        # plot_from_params suele devolver (fig, ax)
+        if isinstance(fig_ax, tuple) and len(fig_ax) >= 1:
+            fig = fig_ax[0]
+        else:
+            fig = fig_ax
+
+        if _fig_is_empty(fig):
+            return False, "Figura vacía (sin data)"
+        return True, "OK"
+
+    except Exception as e:
+        return False, f"Error ejecutando plot_from_params: {type(e).__name__}: {e}"
+
+
+def generar_params_con_reintento_ia(
+    df,
+    prompt_grafica: str,
+    *,
+    max_retries: int = 1,  # por ahora 1 reintento
+) -> dict:
+    """
+    Flujo simplista:
+    graficos_gpt5 -> validar (ejecutando plot_from_params)
+    si falla o vacío -> graficos_gpt5 otra vez -> validar -> si ok retorna
+    """
+    last_reason = None
+
+    for attempt in range(max_retries + 1):
+        params = graficos_gpt5(df, prompt_grafica)
+
+        ok, reason = validar_params_grafica_por_ejecucion(df, params)
+        if ok:
+            return params
+
+        last_reason = reason
+
+    # Si ya no hay reintentos
+    raise ValueError(
+        "No se logró generar una gráfica operable tras reintentos.\n"
+        f"Motivo final: {last_reason}"
+    )
+
 def process_plot_blocks(
     df: pd.DataFrame,
     texto: str,
@@ -786,10 +884,59 @@ def process_plot_blocks(
     - Batching de bloques #...# (optimiza costo IA)
     - Paralelización de graficos_gpt5 (optimiza tiempo)
     - Render de gráficas y reemplazo determinista
+
+    🔥 NUEVO (simplista):
+    - Prevalida por ejecución real:
+      plot_from_params(df, params)
+      si falla o figura vacía -> reintenta IA 1 vez (solo para ese bloque)
     """
 
     import concurrent.futures
     import json
+
+    # -------------------------------------------------
+    # 0️⃣ Helpers ultra simples (NO cambian tu lógica)
+    # -------------------------------------------------
+    def _fig_is_empty(fig) -> bool:
+        """
+        Determina si una figura salió vacía (sin data visible).
+        Soporta Matplotlib y Plotly de forma simple.
+        """
+        if fig is None:
+            return True
+
+        # Matplotlib
+        if hasattr(fig, "axes"):
+            if not fig.axes:
+                return True
+            has_any_data = False
+            for ax in fig.axes:
+                try:
+                    if ax.has_data():
+                        has_any_data = True
+                        break
+                except Exception:
+                    pass
+            return not has_any_data
+
+        # Plotly
+        if hasattr(fig, "data"):
+            try:
+                return len(fig.data) == 0
+            except Exception:
+                return True
+
+        # Si no sabemos identificarlo, asumimos NO vacío
+        return False
+
+    def _try_plot(df, params):
+        """
+        Intenta graficar. Si hay error o figura vacía, levanta excepción.
+        """
+        fig, ax = plot_from_params(df, params)
+        if _fig_is_empty(fig):
+            raise ValueError("Figura vacía (sin data)")
+        return fig, ax
 
     # -------------------------------------------------
     # 1️⃣ Extraer bloques
@@ -850,9 +997,12 @@ def process_plot_blocks(
             except Exception as e:
                 if debug:
                     print("Error future gráficos:", e)
+
     json_grafos = json.dumps(resultados_por_idx, ensure_ascii=False, indent=2)
+
     # -------------------------------------------------
     # 5️⃣ Renderizar gráficas (SECUENCIAL)
+    #    + REINTENTO IA si falla / vacío (1 vez)
     # -------------------------------------------------
     resultados_graficos = []
 
@@ -866,13 +1016,52 @@ def process_plot_blocks(
 
         params = item.get("params")
 
+        # ---- 1er intento normal ----
         try:
-            fig, ax = plot_from_params(df, params)
+            fig, ax = _try_plot(df, params)
             uri = _fig_to_data_uri(fig)
             resultados_graficos.append((idx, params, span, uri))
-        except Exception as e:
-            error_uri = f"data:text/plain;base64,{_to_base64(f'error:{str(e)}')}"
-            resultados_graficos.append((idx, params, span, error_uri))
+            continue
+
+        except Exception as e1:
+            # ✅ NUEVO: reintento IA simplista solo para este bloque
+            if debug:
+                print(f"[plot retry] idx={idx} falló primer intento:", str(e1))
+
+            try:
+                # mini-batch con solo este bloque
+                out_retry = _procesar_batch([bloque])
+
+                # out_retry debe ser lista de dicts con idx/params
+                retry_item = None
+                if isinstance(out_retry, list):
+                    for it in out_retry:
+                        if isinstance(it, dict) and it.get("idx") == idx and "params" in it:
+                            retry_item = it
+                            break
+
+                if retry_item and isinstance(retry_item.get("params"), dict):
+                    # actualizamos params para el render
+                    params = retry_item["params"]
+                    resultados_por_idx[idx] = retry_item  # mantiene consistencia interna
+
+                    # ---- 2do intento con params nuevos ----
+                    fig, ax = _try_plot(df, params)
+                    uri = _fig_to_data_uri(fig)
+                    resultados_graficos.append((idx, params, span, uri))
+                    continue
+
+                else:
+                    # no pudimos obtener params válidos del reintento
+                    raise ValueError("Reintento IA no devolvió params válidos para esta gráfica")
+
+            except Exception as e2:
+                # fallback final: tu lógica original de error_uri
+                if debug:
+                    print(f"[plot retry] idx={idx} también falló reintento:", str(e2))
+
+                error_uri = f"data:text/plain;base64,{_to_base64(f'error:{str(e2)}')}"
+                resultados_graficos.append((idx, params, span, error_uri))
 
     # -------------------------------------------------
     # 6️⃣ Reemplazar en texto
@@ -883,170 +1072,124 @@ def process_plot_blocks(
         formato="html"
     )
 
+    # ✅ json final actualizado (por si hubo retries que cambiaron params)
+    json_grafos = json.dumps(resultados_por_idx, ensure_ascii=False, indent=2)
+
     return texto_reemplazado, json_grafos
 
 
-# def process_plot_blocks(df: pd.DataFrame, texto: str):
-#     # Ejecutar graficos_gpt5 y asegurar conversión a JSON
-#     extract = extraer_plot_blocks(texto)
-#     out = graficos_gpt5(df, extract)
-#     if isinstance(out, str):
-#         try:
-#             out = json.loads(out)
-#         except json.JSONDecodeError as e:
-#             raise ValueError(f"JSON inválido: {e}") from e
-
-#     # Validar tipo
-#     if not isinstance(out, list):
-#         raise TypeError("El resultado de graficos_gpt5 debe ser una lista de objetos JSON.")
-
-#     params_list = []
-#     resultados_graficos: List[
-#         Tuple[int, Dict[str, Any], Union[Tuple[int, int], None], Union[str, Dict[str, str]]]
-#     ] = []
-#     for item in out:
-#         if isinstance(item, dict) and "params" in item:
-#             idx, params, span = item["idx"], item["params"], item["span"]
-#             params_list.append(params)
-#             try:
-#                 fig, ax = plot_from_params(df, params)
-#                 resultados = _fig_to_data_uri(fig)
-#                 resultados_graficos.append((idx, params, span, resultados))
-#             except Exception as e:
-#                 # En caso de error, aún registramos la entrada para trazabilidad (sin romper el tipo)
-#                 error_uri = f"data:text/plain;base64,{_to_base64(f'error:{str(e)}')}"
-#                 resultados_graficos.append((idx, params, span, error_uri))
-
-#     # 3) Reemplazar spans por data-URIs (elige el formato que prefieras: "uri" | "md" | "html")
-#     texto_reemplazado = aplicar_graficos_en_texto(texto, resultados_graficos, formato="html")
-
-#     return texto_reemplazado
-
-
-# @register("aplicar_multiples_columnas_gpt5")
-# def aplicar_multiples_columnas_gpt5(
+# def process_plot_blocks(
 #     df: pd.DataFrame,
-#     tareas: List[Dict[str, Any]],
+#     texto: str,
 #     *,
-#     replace_existing: bool = True,
-#     chunk_tareas: int = 1,
-#     chunk_registros: int = 300,
+#     batch_size: int = 6,
+#     max_workers: int = 2,
 #     debug: bool = False,
-#     fn_ia = columns_batch_gpt5
 # ):
 #     """
-#     Versión optimizada con CLUSTERING:
-#     Agrupa registros con los mismos valores en columnas_necesarias
-#     para reducir llamadas a IA sin alterar la lógica original.
+#     Versión FINAL paralelizada del orquestador de GRÁFICAS:
+
+#     - Batching de bloques #...# (optimiza costo IA)
+#     - Paralelización de graficos_gpt5 (optimiza tiempo)
+#     - Render de gráficas y reemplazo determinista
 #     """
 
+#     import concurrent.futures
 #     import json
-#     import math
-#     from collections import defaultdict
 
-#     if not tareas:
-#         return df
-
-#     df_out = df.copy()
+#     # -------------------------------------------------
+#     # 1️⃣ Extraer bloques
+#     # -------------------------------------------------
+#     extract = extraer_plot_blocks(texto)
+#     if not extract:
+#         return texto
 
 #     def _chunk_list(lst, size):
 #         for i in range(0, len(lst), size):
-#             yield lst[i:i+size]
+#             yield lst[i:i + size]
 
-#     # Inicializar columnas de salida
-#     for tarea in tareas:
-#         col = tarea["nueva_columna"]
-#         if col not in df_out.columns:
-#             df_out[col] = None
+#     # -------------------------------------------------
+#     # 2️⃣ Crear batches
+#     # -------------------------------------------------
+#     batches = list(_chunk_list(extract, batch_size))
 
-#     # Procesamiento por batches de tareas
-#     for tareas_batch in _chunk_list(tareas, chunk_tareas):
+#     # -------------------------------------------------
+#     # 3️⃣ Job IA (batch)
+#     # -------------------------------------------------
+#     def _procesar_batch(batch):
+#         try:
+#             out = graficos_gpt5(df, batch)
+#             if isinstance(out, str):
+#                 try:
+#                     out = _json_loads_loose(out)
+#                 except Exception as e:
+#                     if debug:
+#                         print("Error parseando JSON gráficos:", e)
+#                     return []
 
-#         # 1️⃣ Determinar qué columnas necesita IA
-#         columnas_necesarias = set()
-#         for tarea in tareas_batch:
-#             cols = tarea["registro_cols"]
-#             if isinstance(cols, str):
-#                 columnas_necesarias.add(cols)
-#             else:
-#                 columnas_necesarias.update(cols)
-#         columnas_necesarias = list(columnas_necesarias)
+#             if not isinstance(out, list):
+#                 return []
+#         except Exception as e:
+#             if debug:
+#                 print("Error IA graficos batch:", e)
+#             return []
 
-#         # 2️⃣ Preparar metadata de tareas para IA
-#         tareas_para_ia = []
-#         for tarea in tareas_batch:
-#             tareas_para_ia.append({
-#                 "columna": tarea["nueva_columna"],
-#                 "criterios": tarea["criterios"],
-#                 "registro_cols": tarea["registro_cols"]
-#             })
+#         if not isinstance(out, list):
+#             return []
 
-#         # Procesar registros por batches
-#         for reg_indices in _chunk_list(df_out.index.tolist(), chunk_registros):
+#         return out  # [{idx, params, span}...]
 
-#             # --- CLUSTERING: agrupar registros idénticos ---
-#             clusters = defaultdict(list)   # key → lista de ids
-#             registros_unicos = {}          # key → registro dict
+#     # -------------------------------------------------
+#     # 4️⃣ Ejecutar IA en paralelo
+#     # -------------------------------------------------
+#     resultados_por_idx = {}
 
-#             for idx in reg_indices:
-#                 row = df_out.loc[idx]
-#                 registro = {col: row[col] for col in columnas_necesarias}
+#     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+#         futures = [executor.submit(_procesar_batch, batch) for batch in batches]
 
-#                 # llave determinista para agrupar
-#                 key = tuple(registro[col] for col in columnas_necesarias)
-
-#                 clusters[key].append(idx)
-
-#                 # Guardar solo un ejemplo por grupo
-#                 if key not in registros_unicos:
-#                     registros_unicos[key] = registro
-
-#             # Construir registros compactados para IA
-#             registros_para_ia = []
-#             for group_id, (key, registro) in enumerate(registros_unicos.items()):
-#                 registros_para_ia.append({
-#                     "idx": f"G{group_id}",   # id sintético del grupo
-#                     "registro": registro
-#                 })
-
-#             # Payload final para IA
-#             payload = {
-#                 "Tareas": tareas_para_ia,
-#                 "Registros": registros_para_ia
-#             }
-
-#             # --- Llamar IA ---
+#         for future in concurrent.futures.as_completed(futures):
 #             try:
-#                 respuesta = fn_ia(payload)
+#                 out_batch = future.result()
+#                 for item in out_batch:
+#                     if isinstance(item, dict) and "params" in item:
+#                         resultados_por_idx[item["idx"]] = item
 #             except Exception as e:
-#                 print("Error IA:", e)
-#                 continue
+#                 if debug:
+#                     print("Error future gráficos:", e)
+#     json_grafos = json.dumps(resultados_por_idx, ensure_ascii=False, indent=2)
+#     # -------------------------------------------------
+#     # 5️⃣ Renderizar gráficas (SECUENCIAL)
+#     # -------------------------------------------------
+#     resultados_graficos = []
 
-#             resultados = respuesta.get("Resultados", {})
+#     for bloque in sorted(extract, key=lambda b: b["idx"]):
+#         idx = bloque["idx"]
+#         span = bloque["span"]
 
-#             # --- Reasignar resultados a TODOS los ids del grupo ---
-#             for colname, lista_items in resultados.items():
+#         item = resultados_por_idx.get(idx)
+#         if not item:
+#             continue
 
-#                 # Mapa: id_ia → etiqueta
-#                 mapa_respuestas = {}
-#                 for item in lista_items:
-#                     id_ia = item.get("id", item.get("idx"))
-#                     val = item.get("resultado", item.get("etiqueta"))
-#                     mapa_respuestas[id_ia] = val
+#         params = item.get("params")
 
-#                 # Reaplicar resultados a cada grupo
-#                 for group_id, (key, _) in enumerate(registros_unicos.items()):
-#                     etiqueta = mapa_respuestas.get(f"G{group_id}")
+#         try:
+#             fig, ax = plot_from_params(df, params)
+#             uri = _fig_to_data_uri(fig)
+#             resultados_graficos.append((idx, params, span, uri))
+#         except Exception as e:
+#             error_uri = f"data:text/plain;base64,{_to_base64(f'error:{str(e)}')}"
+#             resultados_graficos.append((idx, params, span, error_uri))
 
-#                     if etiqueta is None:
-#                         continue
+#     # -------------------------------------------------
+#     # 6️⃣ Reemplazar en texto
+#     # -------------------------------------------------
+#     texto_reemplazado = aplicar_graficos_en_texto(
+#         texto,
+#         resultados_graficos,
+#         formato="html"
+#     )
 
-#                     # asignar a todos los registros originales
-#                     for rid in clusters[key]:
-#                         if rid in df_out.index:
-#                             df_out.at[rid, colname] = etiqueta
-
-#     return df_out
+#     return texto_reemplazado, json_grafos
 
 
 @register("aplicar_multiples_columnas_gpt5")
@@ -2381,6 +2524,8 @@ def process_titulo_blocks(texto: str) -> str:
         raise RuntimeError(f"Error al reemplazar títulos numerados: {e}")
 
     return texto_final, tabla_contenido
+
+
 import re
 
 def remover_contenedores_apendice(html: str) -> str:
@@ -2556,3 +2701,22 @@ def crear_resultado_agregado(
     )
 
     return out
+
+
+
+
+def eliminar_duplicados_ultimo(
+    df: pd.DataFrame,
+    col_unica: Union[str, List[str]]
+) -> pd.DataFrame:
+  
+    if df is None or df.empty:
+        return df
+
+    if isinstance(col_unica, str):
+        col_unica = [col_unica]
+
+    # Mantiene el último registro por cada duplicado, respetando el orden actual del DataFrame
+    df_final = df.drop_duplicates(subset=col_unica, keep="last").reset_index(drop=True)
+
+    return df_final
