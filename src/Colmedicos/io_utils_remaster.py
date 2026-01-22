@@ -4,6 +4,9 @@ import re
 import json
 import time
 import base64
+import hashlib
+import concurrent.futures
+from collections import defaultdict
 from collections.abc import Iterable
 from typing import Any, Dict, List, Tuple, Union, Optional, Callable
 
@@ -1198,9 +1201,9 @@ def aplicar_multiples_columnas_gpt5(
     tareas: List[Dict[str, Any]],
     *,
     replace_existing: bool = True,
-    chunk_tareas: int = 1,
-    chunk_registros: int = 300,
-    max_workers: int = 8,
+    chunk_tareas: int = 10,      # ✅ OPTIMIZADO: Agrupar más tareas por batch
+    chunk_registros: int = 500,  # ✅ OPTIMIZADO: Aumentado de 300 a 500 (menos llamadas)
+    max_workers: int = 10,       # ✅ OPTIMIZADO: Aumentado de 8 a 10 (match con semaphore)
     debug: bool = False,
     fn_ia=columns_batch_gpt5
 ):
@@ -1270,25 +1273,65 @@ def aplicar_multiples_columnas_gpt5(
     # 3️⃣ Función ejecutada en paralelo (PURA)
     # -------------------------------------------------
     def _procesar_job(job):
+        import hashlib
+
         clusters = defaultdict(list)
         registros_unicos = {}
+
+        # OPTIMIZADO: clustering con hash para mejor performance
+        def _hash_registro(reg_dict):
+            """Genera hash estable para clustering de registros"""
+            # Normalizar valores (NaN → None, floats a strings)
+            valores = []
+            for col in job["columnas_necesarias"]:
+                val = reg_dict.get(col)
+                if pd.isna(val):
+                    valores.append("__NAN__")
+                elif isinstance(val, (float, np.floating)):
+                    valores.append(f"{val:.6f}")  # Precisión fija
+                else:
+                    valores.append(str(val))
+
+            # Hash MD5 (rápido, suficiente para clustering)
+            clave = "|".join(valores)
+            return hashlib.md5(clave.encode('utf-8')).hexdigest()
 
         # clustering
         for idx in job["reg_indices"]:
             row = df_out.loc[idx]
             registro = {col: row[col] for col in job["columnas_necesarias"]}
-            key = tuple(registro[col] for col in job["columnas_necesarias"])
+            key = _hash_registro(registro)  # ✅ Hash en lugar de tupla
 
             clusters[key].append(idx)
             if key not in registros_unicos:
                 registros_unicos[key] = registro
 
         # registros compactados
+        from datetime import datetime
+        fecha_hoy = datetime.now().strftime("%Y-%m-%d")
+
         registros_para_ia = []
         for group_id, registro in enumerate(registros_unicos.values()):
+            # ✅ FIX CRÍTICO: Agregar fecha_hoy al registro
+            # El prompt del sistema dice que fecha_hoy debe estar en el registro
+            registro_con_fecha = registro.copy()
+            registro_con_fecha["fecha_hoy"] = fecha_hoy
+
+            # ✅ FIX: Convertir tipos no serializables a JSON
+            for key, val in registro_con_fecha.items():
+                # Timestamps → string
+                if pd.api.types.is_datetime64_any_dtype(type(val)) or isinstance(val, pd.Timestamp):
+                    registro_con_fecha[key] = val.strftime('%Y-%m-%d %H:%M:%S') if not pd.isna(val) else None
+                # numpy int/float → Python int/float
+                elif isinstance(val, (np.integer, np.floating)):
+                    registro_con_fecha[key] = val.item()  # Convierte np.int64/np.float64 a int/float nativo
+                # NaN → None
+                elif pd.isna(val):
+                    registro_con_fecha[key] = None
+
             registros_para_ia.append({
                 "idx": f"G{group_id}",
-                "registro": registro
+                "registro": registro_con_fecha
             })
 
         payload = {
@@ -1297,7 +1340,7 @@ def aplicar_multiples_columnas_gpt5(
         }
 
         try:
-            respuesta = fn_ia(payload)
+            respuesta = fn_ia(payload, fecha_hoy=fecha_hoy)
         except Exception as e:
             if debug:
                 print("Error IA:", e)
@@ -1306,21 +1349,54 @@ def aplicar_multiples_columnas_gpt5(
         resultados = respuesta.get("Resultados", {})
         updates = []
 
+        # ===== DIAGNÓSTICO =====
+        import os
+        DEBUG_DIAGNOSTICO = os.getenv("DEBUG_DIAGNOSTICO", "0") == "1"
+
+        if DEBUG_DIAGNOSTICO:
+            columnas_esperadas = [t["columna"] for t in job["tareas_para_ia"]]
+            print(f"\n[DEBUG io_utils_remaster] Procesando respuesta de IA:")
+            print(f"  Columnas ESPERADAS: {columnas_esperadas}")
+            print(f"  Columnas RECIBIDAS: {list(resultados.keys())}")
+            for colname, items in resultados.items():
+                en_esperadas = "✅" if colname in columnas_esperadas else "❌ NO ESPERADA"
+                print(f"  {colname}: {len(items)} items {en_esperadas}")
+        # =======================
+
         # reconstrucción resultados → ids reales
         for colname, lista_items in resultados.items():
             mapa_respuestas = {}
             for item in lista_items:
                 id_ia = item.get("id", item.get("idx"))
                 val = item.get("resultado", item.get("etiqueta"))
-                mapa_respuestas[id_ia] = val
+                # ✅ FIX: Normalizar ID a string para matching consistente
+                mapa_respuestas[str(id_ia)] = val
 
+            if DEBUG_DIAGNOSTICO:
+                print(f"  {colname} - mapa_respuestas: {mapa_respuestas}")
+
+            matched_count = 0
             for group_id, key in enumerate(registros_unicos.keys()):
+                # ✅ FIX: Intentar "G{n}" primero, luego fallback a "{n}" (igual que V2)
                 etiqueta = mapa_respuestas.get(f"G{group_id}")
                 if etiqueta is None:
+                    # Fallback: IA a veces devuelve ID sin prefijo "G"
+                    etiqueta = mapa_respuestas.get(str(group_id))
+                if etiqueta is None:
+                    if DEBUG_DIAGNOSTICO:
+                        print(f"    [WARN] G{group_id} no tiene etiqueta en respuesta IA. Keys: {list(mapa_respuestas.keys())[:5]}")
                     continue
 
+                matched_count += 1
                 for rid in clusters[key]:
                     updates.append((rid, colname, etiqueta))
+
+            if DEBUG_DIAGNOSTICO:
+                print(f"  {colname} - Matched {matched_count}/{len(registros_unicos)} grupos")
+                print(f"  {colname} - Generados {len([u for u in updates if u[1] == colname])} updates")
+
+        if DEBUG_DIAGNOSTICO:
+            print(f"[DEBUG io_utils_remaster] Total updates generados: {len(updates)}\n")
 
         return updates
 
@@ -1343,9 +1419,274 @@ def aplicar_multiples_columnas_gpt5(
     # -------------------------------------------------
     # 5️⃣ Aplicar resultados (hilo principal)
     # -------------------------------------------------
+    import os
+    DEBUG_DIAGNOSTICO = os.getenv("DEBUG_DIAGNOSTICO", "0") == "1"
+
+    if DEBUG_DIAGNOSTICO:
+        print(f"\n[DEBUG io_utils_remaster] Aplicando updates:")
+        print(f"  Total updates: {len(all_updates)}")
+
+        # Resumen por columna
+        from collections import Counter
+        col_counts = Counter(colname for _, colname, _ in all_updates)
+        for col, cnt in col_counts.items():
+            en_df = "✅" if col in df_out.columns else "❌ NO EXISTE EN DF"
+            print(f"  {col}: {cnt} updates {en_df}")
+
+    applied_count = 0
+    skipped_idx = 0
+    skipped_col = 0
+
     for rid, colname, etiqueta in all_updates:
-        if rid in df_out.index:
-            df_out.at[rid, colname] = etiqueta
+        if rid not in df_out.index:
+            skipped_idx += 1
+            continue
+        if colname not in df_out.columns:
+            skipped_col += 1
+            continue
+        df_out.at[rid, colname] = etiqueta
+        applied_count += 1
+
+    if DEBUG_DIAGNOSTICO:
+        print(f"  Updates aplicados: {applied_count}")
+        print(f"  Skipped (índice no existe): {skipped_idx}")
+        print(f"  Skipped (columna no existe): {skipped_col}")
+
+    # -------------------------------------------------
+    # 6️⃣ Convertir columnas a tipo numérico si es posible
+    # -------------------------------------------------
+    # Después de aplicar los updates, intentar convertir columnas a numérico
+    # Esto preserva int/float en lugar de mantener todo como object
+    for tarea in tareas:
+        col = tarea["nueva_columna"]
+        if col in df_out.columns:
+            # Intentar convertir a numérico (errors='ignore' mantiene original si falla)
+            df_out[col] = pd.to_numeric(df_out[col], errors='ignore')
+
+    return df_out
+
+
+
+@register("aplicar_multiples_columnas_gpt5_ultra_v2")
+def aplicar_multiples_columnas_gpt5_ultra_v2(
+    df: pd.DataFrame,
+    tareas: List[Dict[str, Any]],
+    *,
+    replace_existing: bool = True,
+    chunk_registros_unicos: int = 500,
+    max_workers: int = 10,
+    batch_timeout: int = 180,
+    max_retries: int = 2,
+    float_precision: int = 6,
+    fn_ia=columns_batch_gpt5,
+):
+    """
+    Versión HÍBRIDA OPTIMIZADA para generación de columnas con IA.
+
+    Combina paralelismo a nivel de tareas con clustering por tarea para
+    maximizar velocidad y minimizar tokens enviados a la API.
+
+    Parámetros:
+    -----------
+    df : pd.DataFrame
+        DataFrame con los datos a procesar.
+    tareas : List[Dict]
+        Lista de tareas. Cada tarea debe tener:
+        - "nueva_columna": nombre de la columna a crear
+        - "criterios": dict con reglas de clasificación/cálculo
+        - "registro_cols": columnas necesarias para la tarea
+    replace_existing : bool, default=True
+        Si True, reemplaza valores existentes en las columnas.
+    chunk_registros_unicos : int, default=500
+        Registros únicos por llamada IA (no usado actualmente, reservado).
+    max_workers : int, default=10
+        Workers paralelos para ejecutar tareas.
+    batch_timeout : int, default=180
+        Timeout en segundos por tarea.
+    max_retries : int, default=2
+        Reintentos por tarea si falla.
+    float_precision : int, default=6
+        Decimales para redondeo en hashing.
+    fn_ia : callable, default=columns_batch_gpt5
+        Función de IA a utilizar.
+
+    Retorna:
+    --------
+    pd.DataFrame
+        DataFrame con las nuevas columnas agregadas.
+    """
+    from typing import Tuple
+    from datetime import datetime
+
+    if df is None or df.empty or not tareas:
+        return df
+
+    df_out = df.copy()
+
+    def _safe_isna(v) -> bool:
+        try:
+            return pd.isna(v)
+        except Exception:
+            return v is None
+
+    def _normalize_for_hash(val: Any) -> str:
+        if _safe_isna(val):
+            return "__NAN__"
+        if isinstance(val, (float, np.floating)):
+            return f"{float(val):.{float_precision}f}"
+        return str(val)
+
+    def _hash_registro(registro: dict, cols: List[str]) -> str:
+        clave = "|".join(_normalize_for_hash(registro.get(c)) for c in cols)
+        return hashlib.md5(clave.encode("utf-8")).hexdigest()
+
+    # Inicializar columnas de salida
+    for tarea in tareas:
+        col = tarea.get("nueva_columna")
+        if col and col not in df_out.columns:
+            df_out[col] = None
+
+    def _procesar_tarea(tarea: Dict[str, Any], _: int) -> List[Tuple[Any, str, Any]]:
+        """Procesa una tarea completa con clustering."""
+        col_out = tarea.get("nueva_columna")
+        criterios = tarea.get("criterios")
+        reg_cols = tarea.get("registro_cols", [])
+
+        if not col_out or criterios is None:
+            return []
+
+        if isinstance(reg_cols, str):
+            columnas_tarea = [reg_cols]
+        else:
+            columnas_tarea = list(reg_cols)
+
+        columnas_tarea = [c for c in columnas_tarea if c in df_out.columns]
+        if not columnas_tarea:
+            return []
+
+        # Clustering para esta tarea
+        clusters = defaultdict(list)
+        registros_unicos = {}
+
+        for idx in df_out.index:
+            row = df_out.loc[idx]
+            registro = {c: row[c] for c in columnas_tarea}
+            key = _hash_registro(registro, columnas_tarea)
+            clusters[key].append(idx)
+            if key not in registros_unicos:
+                registros_unicos[key] = registro
+
+        # Preparar payload
+        fecha_hoy = datetime.now().strftime("%Y-%m-%d")
+        registros_para_ia = []
+        unique_keys = list(registros_unicos.keys())
+
+        for group_id, key in enumerate(unique_keys):
+            registro = registros_unicos[key].copy()
+            registro["fecha_hoy"] = fecha_hoy
+
+            for k, v in registro.items():
+                if pd.api.types.is_datetime64_any_dtype(type(v)) or isinstance(v, pd.Timestamp):
+                    registro[k] = v.strftime('%Y-%m-%d %H:%M:%S') if not _safe_isna(v) else None
+                elif isinstance(v, (np.integer, np.floating)):
+                    registro[k] = v.item()
+                elif _safe_isna(v):
+                    registro[k] = None
+
+            registros_para_ia.append({
+                "idx": f"G{group_id}",
+                "registro": registro
+            })
+
+        payload = {
+            "Tareas": [{
+                "columna": col_out,
+                "criterios": criterios,
+                "registro_cols": reg_cols
+            }],
+            "Registros": registros_para_ia
+        }
+
+        # Llamar IA con reintentos
+        respuesta = None
+        for _ in range(max_retries + 1):
+            try:
+                respuesta = fn_ia(payload, fecha_hoy=fecha_hoy)
+                if respuesta and isinstance(respuesta, dict) and "Resultados" in respuesta:
+                    break
+            except Exception:
+                pass
+
+        if respuesta is None or "Resultados" not in respuesta:
+            return []
+
+        # Parsear respuesta y expandir a filas reales
+        resultados = respuesta.get("Resultados", {})
+        items = resultados.get(col_out, [])
+
+        if not items:
+            return []
+
+        mapa_respuestas = {}
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            id_ia = item.get("id", item.get("idx"))
+            val = item.get("resultado", item.get("etiqueta"))
+            if id_ia is not None:
+                mapa_respuestas[str(id_ia)] = val
+
+        updates = []
+        for group_id, key in enumerate(unique_keys):
+            etiqueta = mapa_respuestas.get(f"G{group_id}")
+            if etiqueta is None:
+                etiqueta = mapa_respuestas.get(str(group_id))
+            if etiqueta is None:
+                continue
+            for rid in clusters[key]:
+                updates.append((rid, col_out, etiqueta))
+
+        return updates
+
+    # Ejecutar todas las tareas en paralelo
+    all_updates = []
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(_procesar_tarea, tarea, idx): (idx, tarea.get("nueva_columna"))
+            for idx, tarea in enumerate(tareas)
+        }
+
+        for fut in concurrent.futures.as_completed(futures, timeout=batch_timeout * len(tareas)):
+            try:
+                updates = fut.result(timeout=batch_timeout)
+                all_updates.extend(updates)
+            except Exception:
+                pass
+
+    # Aplicar updates al DataFrame
+    updates_by_col = defaultdict(dict)
+    for rid, colname, etiqueta in all_updates:
+        if rid in df_out.index and colname in df_out.columns:
+            updates_by_col[colname][rid] = etiqueta
+
+    for colname, updates_dict in updates_by_col.items():
+        if updates_dict:
+            updates_series = pd.Series(updates_dict)
+            if replace_existing:
+                df_out.loc[updates_series.index, colname] = updates_series.values
+            else:
+                current = df_out.loc[updates_series.index, colname]
+                mask = current.isna() | (current == "")
+                indices_to_update = mask[mask].index
+                if len(indices_to_update) > 0:
+                    df_out.loc[indices_to_update, colname] = updates_series[indices_to_update].values
+
+    # Convertir columnas a tipo numérico si es posible
+    for tarea in tareas:
+        col = tarea.get("nueva_columna")
+        if col and col in df_out.columns:
+            df_out[col] = pd.to_numeric(df_out[col], errors='ignore')
 
     return df_out
 

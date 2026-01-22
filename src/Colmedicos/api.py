@@ -2,8 +2,9 @@
 from Colmedicos.ia import ask_gpt5
 from Colmedicos.io_utils import generar_output, aplicar_data_por_tipo_desde_output, aplicar_ia_por_tipo, aplicar_plot_por_tipo_desde_output, exportar_output_a_html, mostrar_html, limpiar_output_dataframe
 from Colmedicos.registry import register
-from Colmedicos.io_utils_remaster import process_ia_blocks, process_data_blocks, process_plot_blocks, _render_vars_text, exportar_output_a_html, _fig_to_data_uri, _format_result_plain, columnas_a_texto,aplicar_multiples_columnas_gpt5, limpieza_final,  unpivot_df, dividir_columna_en_dos, procesar_codigos_cie10, unir_dataframes, expand_json_column, procesar_apendices, process_titulo_blocks, remover_contenedores_apendice, reemplazar_textos, crear_resultado_agregado, normalizar_columna, eliminar_duplicados_ultimo
+from Colmedicos.io_utils_remaster import process_ia_blocks, process_data_blocks, process_plot_blocks, _render_vars_text, exportar_output_a_html, _fig_to_data_uri, _format_result_plain, columnas_a_texto,aplicar_multiples_columnas_gpt5, limpieza_final,  unpivot_df, dividir_columna_en_dos, procesar_codigos_cie10, unir_dataframes, expand_json_column, procesar_apendices, process_titulo_blocks, remover_contenedores_apendice, reemplazar_textos, crear_resultado_agregado, normalizar_columna, eliminar_duplicados_ultimo, aplicar_multiples_columnas_gpt5_ultra_v2
 import pandas as pd
+
 
 # Colmedicos/api.py
 import time
@@ -65,7 +66,8 @@ def informe_final(
     if tareas is None:
         tareas = []
     t10 = time.perf_counter()
-    df_out = aplicar_multiples_columnas_gpt5(df_out, tareas)
+    #df_out = aplicar_multiples_columnas_gpt5(df_out, tareas)
+    df_out = aplicar_multiples_columnas_gpt5_ultra_v2(df_out, tareas)
     meta_detalle["t_manipulacion_columnas"] = round(time.perf_counter() - t10, 4)
     print("✔ Columnas creadas con éxito")
 

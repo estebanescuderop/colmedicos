@@ -24,12 +24,6 @@ import openai  # (o reemplaza por: from openai import OpenAI)
 # --- Project-local ---
 from Colmedicos.registry import register
 
-# ----- CACHES DE COERCIÓN (GLOBAL) -----
-_NUMERIC_COERCION_CACHE = {}
-_DATETIME_COERCION_CACHE = {}
-_STRING_COERCION_CACHE = {}
-
-
 _ALLOWED_OPS = {
     '>', '<', '==', '!=', '>=', '<=',
     'in', 'not in',

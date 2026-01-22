@@ -16,7 +16,9 @@ import time
 import random
 
 # Limita cuántas llamadas simultáneas le haces al LLM en TODO el proceso
-LLM_SEMAPHORE = threading.Semaphore(3)  # ajusta 2-6 según tu server
+# OPTIMIZADO: Aumentado a 10 para mejor throughput con 30K registros
+# OpenAI permite hasta 500 RPM en tier free, 5000 RPM en tier 1
+LLM_SEMAPHORE = threading.Semaphore(10)  # ajusta según tu tier de OpenAI
 
 RETRIABLE_MARKERS = [
     "429", "rate limit", "ratelimit",
@@ -113,7 +115,9 @@ def ask_gpt5(pregunta):
     instruc = json.dumps(pregunta, ensure_ascii=False)
     client_ask = openai.OpenAI(api_key=API_KEY2)
     respuesta = call_llm_safe(client_ask.chat.completions.create,
-        model="gpt-4.1",  # 👈 Aquí usas GPT-5 directamente
+        model="gpt-4.1",
+        prompt_cache_retention="24h",
+        prompt_cache_key="colmedicos_analisis",
         messages=[
             {"role": "system", "content": rol},
             {"role": "user", "content": instruccion + instruc}
@@ -130,7 +134,7 @@ from Colmedicos.registry import register
 _MSJ_GRAFO_V2 = """Eres un planificador experto en visualizaciones estadísticas a partir de datos tabulares.
 Convierte instrucciones en español a parámetros técnicos de gráficas, devolviendo EXCLUSIVAMENTE JSON válido UTF-8 (sin texto adicional, sin comentarios, sin fences). La salida se usará directamente por un generador; si la salida no es JSON válido, el proceso falla.
 
-COLUMNAS DEL DATAFRAME (base de referencia)
+COLUMNAS DEL DATAFRAME (base de referencia) 
 {COLUMNAS_JSON}
 
 La coincidencia de nombres es case-insensitive y acentos-insensitive.
@@ -633,7 +637,9 @@ Si hubiera varias instrucciones:
 ]
 
 FIN. SOLO JSON.
+"""
 
+_MSJ_GRAFO_V1 = """Eres un planificador experto en visualizaciones estadísticas a partir de datos tabulares.
 Ejecución: Con base en la siguiente {INSTRUCCION} y las columnas {COLUMNAS_JSON}, interpreta y devuelve los parámetros técnicos unicamente en el formato JSON de salida.
 """
 
@@ -697,12 +703,15 @@ def graficos_gpt5(df, pregunta: Union[str, List[Dict[str, Any]]]) -> Union[Dict[
     columnas = df.columns.tolist()
     payload_cols = json.dumps(columnas, ensure_ascii=False)
     instruccion_tipo = json.dumps(pregunta, ensure_ascii=False)
-    subprompt = _MSJ_GRAFO_V2.replace("{COLUMNAS_JSON}", payload_cols).replace("{INSTRUCCION}", str(instruccion_tipo))
+    rol1 = _MSJ_GRAFO_V2
+    subprompt = _MSJ_GRAFO_V1.replace("{COLUMNAS_JSON}", payload_cols).replace("{INSTRUCCION}", str(instruccion_tipo))
     client_grf = openai.OpenAI(api_key=API_KEY3)  
     respuesta = call_llm_safe(client_grf.chat.completions.create,
-    model="gpt-5",  # 👈 Aquí usas GPT-5 directamente
+    model="gpt-5",
+    prompt_cache_retention="24h",
+    prompt_cache_key="colmedicos_graficos_v5",
     messages=[
-            {"role": "system", "content": "Eres un experto en análisis de datos y tu trabajo es interpretar textos y extraer las instrucciones precisas de acuerdo a las columnas de un dataframe"},
+            {"role": "system", "content": rol1},
             {"role": "user", "content": subprompt}
         ]
     )
@@ -904,6 +913,8 @@ Salida esperada:
 
 FIN. SOLO JSON.
 No agregues texto adicional.
+"""
+_MSJ_OP_V2 = """Eres un planificador experto en operaciones estadísticas a partir de datos tabulares.
 Ejecución: Con base en la siguiente {INSTRUCCION} y las columnas {COLUMNAS_JSON}, interpreta y devuelve los parámetros técnicos unicamente en el formato JSON establecido.
 """
 
@@ -914,12 +925,15 @@ def operaciones_gpt5(df, pregunta):
     columnas = df.columns.tolist()
     payload_cols = json.dumps(columnas, ensure_ascii=False)
     instruccion = json.dumps(pregunta, ensure_ascii=False)
-    subprompt = (MSJ_OPS.replace("{COLUMNAS_JSON}", payload_cols).replace("{INSTRUCCION}", str(instruccion)))
+    rol2 = MSJ_OPS
+    subprompt = (_MSJ_OP_V2.replace("{COLUMNAS_JSON}", payload_cols).replace("{INSTRUCCION}", str(instruccion)))
     client_op = openai.OpenAI(api_key=API_KEY2) 
     respuesta = call_llm_safe(client_op.chat.completions.create,
-        model="gpt-5",  # 👈 Aquí usas GPT-5 directamente
+        model="gpt-5",
+        prompt_cache_retention="24h",
+        prompt_cache_key="colmedicos_operaciones_v5",
         messages=[
-            {"role": "system", "content": "Eres un analista que extrae parámetros para realizar calculos a partir de una instrucción en lenguaje natural y una lista de columnas disponibles de un DataFrame de pandas."},
+            {"role": "system", "content": rol2},
             {"role": "user", "content": subprompt}
         ]
     )
@@ -959,7 +973,7 @@ Con base en {Criterios} y el siguiente registro {Registro}, devuelve la etiqueta
 @register("columns_gpt5")
 def columns_gpt5(criterios, registro):
     """Envía un prompt y devuelve la respuesta de GPT-5."""
-    time.sleep(1)
+    # ✅ OPTIMIZADO: Eliminado time.sleep innecesario (el semáforo ya controla rate limiting)
     client_col = openai.OpenAI(api_key=API_KEY)
     respuesta = call_llm_safe(client_col.chat.completions.create,
         model="gpt-4.1-mini",  # 👈 Aquí usas GPT-5 directamente
@@ -972,7 +986,7 @@ def columns_gpt5(criterios, registro):
     texto_respuesta = respuesta.choices[0].message.content
     return texto_respuesta
 
-clasificador_batch = """
+clasificador_batch = """Eres un clasificador determinista por reglas. Tu tarea es procesar VARIAS tareas de clasificación o cálculo en un solo lote. Cada tarea define: una columna de salida, un conjunto de criterios, y las columnas del registro que debe utilizar. Tu trabajo consiste en: → Aplicar los criterios de cada tarea para TODOS los registros. → Generar una salida por cada registro para cada tarea. → Respetar estrictamente el orden de los registros. Debes seguir todas las reglas originales del clasificador por reglas, aplicándolas a cada tarea y registro según lo indicado. La salida debe ser un JSON con los resultados organizados por tarea y registro, sin omitir ninguno ni cambiar el orden. No agregues texto adicional fuera del JSON.
 Eres un clasificador determinista por reglas.
 Tu tarea es procesar VARIAS tareas de clasificación o cálculo en un solo lote.
 Cada tarea define:
@@ -992,7 +1006,7 @@ Recibirás un JSON con dos claves principales: "Tareas" y "Registros" {payload}.
       - "criterios": diccionario cuyas claves son las etiquetas permitidas y los valores son las reglas o cálculos.
       - "registro_cols": lista de nombres de columnas que el registro debe incluir.
   - "Registros": lista de objetos. Cada objeto define:
-      - "idx": índice del registro (entero).
+      - "idx": índice del registro (string).
       - "registro": objeto con los campos de una fila (incluye las columnas indicadas en "registro_cols" de las tareas).
 Recibirás un JSON con esta estructura:
 
@@ -1010,8 +1024,8 @@ Recibirás un JSON con esta estructura:
     ...
   ],
   "Registros": [
-    { "idx": 0, "registro": {...} },
-    { "idx": 1, "registro": {...} },
+    { "idx": "G0", "registro": {...} },
+    { "idx": "G1", "registro": {...} },
     ...
   ]
 }
@@ -1050,7 +1064,51 @@ REGLAS GENERALES (se mantienen TODAS tus reglas originales):
 5) NO AGREGUES texto adicional fuera del JSON.
 6) NO OMÍTAS tareas. Cada tarea debe generar su propia columna.
 7) Para cada tarea, genera un resultado por cada registro.
+8) El texto generado debe ser exactamente igual a los criterios (sin comillas, sin espacios extra, sin saltos).
+9) Los id deben coincidir exactamente con los idx del input.
 
+=========================
+REGLAS OBLIGATORIAS PARA FECHAS Y CÁLCULOS
+=========================
+
+A) Variables especiales disponibles:
+- Cuando te pidan la fecha de hoy tómala de la variable que te van a compartir, úsala como la fecha actual del cálculo.
+- "fecha_hoy" SIEMPRE vendrá en formato ISO: YYYY-MM-DD. Sin embargo homologalo según las reglas de parseo de fechas.
+
+B) Parsing de fechas:
+- Si un campo parece fecha, debes convertirlo a fecha válida.
+- Formatos permitidos:
+  1) YYYY-MM-DD
+  2) YYYY-MM-DD HH:MM:SS
+  3) DD/MM/YYYY
+  4) DD/MM/YYYY HH:MM:SS
+  5) MM/DD/YYYY hh:mm:ss AM/PM
+- Si no puede parsearse, trata de encontrar la fecha a como de lugar.
+
+C) Operaciones con fechas:
+- Se permite restar fechas: (fecha2 - fecha1) = días
+- Si te piden años:
+  años = dias / 365.25 (entero)
+- Si te piden meses:
+  meses = dias / 30.4375 (entero)
+- Si te piden días:
+  dias = diferencia directa (entero)
+
+D) Regla para "hoy":
+- Utiliza el parametro {fecha_hoy} como la fecha actual.
+- Si la fórmula o el cálculo menciona "y", "fecha de hoy", "fecha actual", "actualmente":
+  usa el valor de "fecha_hoy" del registro.
+- Si "fecha_hoy" no existe, trabaja con la fecha: 2026-01-21.
+
+E) Manejo de nulos:
+- Si una fecha requerida es nula o inválida, retorna 0.
+
+F) Salida de cálculos:
+- Los cálculos devuelven SOLO el número (sin texto)
+- Redondea a 2 decimales si el resultado no es entero.
+
+FIN REGLAS FECHAS
+=========================
 CAPACIDAD ADICIONAL: SCORING POR FACTORES
 
 Si dentro de "criterios" existe una clave llamada "factores" y otra llamada "conteo", debes ejecutar un procedimiento adicional OBLIGATORIO:
@@ -1112,29 +1170,40 @@ FORMATO DE RESPUESTA ESPERADO (OBLIGATORIO):
   }
 }
 
-Eres estricto, literal y completamente determinista.
 
-con base en el siguiente payload {payload}, devuelve los resultados en el formato indicado.
+Eres estricto, literal y completamente determinista.
+Devuelve siempre una respuesta válida de acuerdo a las reglas anteriores.
+Devuelve ÚNICAMENTE el JSON solicitado.
+FIN.
+
+"""
+
+clasificador_batch_prompt = """Con base en el siguiente payload {payload} y la fecha de "fecha_hoy": {fecha_hoy} devuelve los resultados en el formato indicado.
 No expliques nada. Devuelve únicamente el JSON.
 """
 
 
 @register("columns_batch_gpt5")
-def columns_batch_gpt5(payload):
+def columns_batch_gpt5(payload, fecha_hoy):
     """Envía un prompt y devuelve la respuesta de GPT-5."""
-    client_columns = openai.OpenAI(api_key=API_KEY3)  
+    client_columns = openai.OpenAI(api_key=API_KEY3)
+    rol3 = clasificador_batch
+    # ✅ OPTIMIZADO: JSON compacto en lugar de str()
+    payload_json = json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
+    # ✅ FIX: Volver a USER role - combina rol3 con prompt en un solo mensaje
     respuesta = call_llm_safe(client_columns.chat.completions.create,
-        model="gpt-4.1",  # 👈 Aquí usas GPT-5 directamente
+        model="gpt-4.1", 
+        prompt_cache_key="colmedicos_clasificador_batch",
+        prompt_cache_retention="24h",
         messages=[
-            {"role": "system", "content": "Eres un asistente preciso y coherente con instrucciones de análisis de texto, especificamente hablando de temas relacionados con salud ocupacional."},
-            {"role": "user", "content": clasificador_batch.replace("{payload}", str(payload))}
+            {"role": "system", "content": rol3},
+            {"role": "user", "content": clasificador_batch_prompt.replace("{payload}", payload_json).replace("{fecha_hoy}", fecha_hoy)}
         ]
     )
-
     texto_respuesta = respuesta.choices[0].message.content
-    params = json.loads(texto_respuesta)
-    return params
+    params = _json_loads_loose(texto_respuesta)
 
+    return params
 
 
 AG_TITULOS = """
@@ -1238,32 +1307,34 @@ Reglas estrictas:
 - Recuerda que SIEMPRE son los que tienen un level diferente de 1, si no aparece así, tomalo como un titulo
 - No incluyas texto fuera del JSON.
 
-
 ================================================================
 5. INSTRUCCIÓN FINAL
 ================================================================
-
-Con base en el arreglo {titulos}, devuelve ÚNICAMENTE el JSON estructurado
-con la numeración incorporada.
-
+devuelve ÚNICAMENTE el JSON 
 No devuelvas nada más.
 FIN.
 
 """
 
-rol1 = """Eres un agente experto en documentación de salud ocupacional.
-Tu tarea es, a partir de una sola cadena de texto que recibirás como entrada, construir una salida JSON con unos titulos numerados"""
-  
+titulos_instruccion = """ Eres un agente experto en estructuración de documentos técnicos en salud ocupacional.
+Tu tarea es CLASIFICAR y NUMERAR cada título en un documento técnico
+Con base en el arreglo {titulos}, devuelve ÚNICAMENTE el JSON estructurado
+con la numeración incorporada.
+"""
+
 @register("titulos_gpt5")
 def titulos_gpt5(texto):
     """Envía un prompt y devuelve la respuesta de GPT-5."""
     texto = json.dumps(texto, ensure_ascii=False)
-    subprompt = AG_TITULOS.replace("{titulos}", texto)
+    subprompt = titulos_instruccion.replace("{titulos}", texto)
+    titulos_sistem = AG_TITULOS
     client_titulos = openai.OpenAI(api_key=API_KEY)
     respuesta = call_llm_safe(client_titulos.chat.completions.create,
-        model="gpt-4.1",  # 👈 Aquí usas GPT-5 directamente
+        model="gpt-4.1",
+        prompt_cache_retention="24h",
+        prompt_cache_key="colmedicos_titulos_v5",
         messages=[
-            {"role": "system", "content": rol1},
+            {"role": "system", "content": titulos_sistem},
             {"role": "user", "content": subprompt}
         ]
     )
@@ -1397,22 +1468,24 @@ No modifiques el texto.
 No inventes datos.
 
 FIN. SOLO JSON.
-Instrucción final: con base al {texto} devuelve solo JSON de salida válido.
 """
 
-rol2 = """Eres un agente experto en documentación de salud ocupacional.
-Tu tarea es, a partir de una sola cadena de texto que recibirás como entrada, construir JSON de salida válido"""
-
+apendices_instruccion = """Eres un agente experto en documentación de salud ocupacional.
+Tu tarea es analizar un texto completo que contiene uno o varios bloques de texto.
+Instrucción final: con base al {texto} devuelve solo JSON de salida válido.
+"""
 
 @register("apendices_gpt5")
 def apendices_gpt5(texto):
     """Envía un prompt y devuelve la respuesta de GPT-5."""
-    subprompt = AG_APENDICES.replace("{texto}", texto)
+    subprompt = apendices_instruccion.replace("{texto}", texto)
     client_apend = openai.OpenAI(api_key=API_KEY)
     respuesta = call_llm_safe(client_apend.chat.completions.create,
-        model="gpt-4.1",  # 👈 Aquí usas GPT-5 directamente
+        model="gpt-4.1",
+        prompt_cache_retention="24h",
+        prompt_cache_key="colmedicos_apendices_v5",
         messages=[
-            {"role": "system", "content": rol2},
+            {"role": "system", "content": AG_APENDICES},
             {"role": "user", "content": subprompt}
         ]
     )

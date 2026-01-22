@@ -83,18 +83,21 @@ tareas = [
       "registro_cols": "obs_osteomuscular",
       "nueva_columna": "Clas_osteomuscular"
     },
-
     {
-      "criterios": { 
-        "factores": [{"nombre": "imc_alto", "condicion": "imc >= 25"},{"nombre": "presion_alta", "condicion": "(presion startswith '13' OR presion startswith '14' OR presion startswith '15')"},{"nombre": "talla_riesgo","condicion": "(genero == 'M' AND cintura > 102) OR (genero == 'F' AND cintura > 88)"}],
-        "Riesgo Bajo": "conteo_factores == 0",
-        "Riesgo Moderado": "conteo_factores == 1",
-        "Riesgo Alto": "conteo_factores >= 2"
-      },
-      "registro_cols": ["cintura", "imc", "presion", "genero"],
-      "nueva_columna": "tipo_riesgo_cardiovascular"
+  "criterios": {
+    "factores": [
+      {"nombre":"imc_alto","condicion":"imc >= 25"},
+      {"nombre":"presion_alta","condicion":"(presion startswith '13' OR presion startswith '14' OR presion startswith '15')"},
+      {"nombre":"talla_riesgo","condicion":"(genero == 'M' AND cintura > 102) OR (genero == 'F' AND cintura > 88)"}
+    ],
+    "conteo": "conteo_factores",
+    "Riesgo Bajo": "conteo_factores == 0",
+    "Riesgo Moderado": "conteo_factores == 1",
+    "Riesgo Alto": "conteo_factores >= 2"
+  },
+  "registro_cols": ["cintura", "imc", "presion", "genero"],
+  "nueva_columna": "tipo_riesgo_cardiovascular"
     },
-
     {
       "criterios": {
         "SI": "Se usa si los trabajadores reportan o manifiestan síntomas...",
@@ -226,11 +229,12 @@ tareas = [
       "nueva_columna": "riesgo_quimico"
     },    
     {
-      "criterios": {
-       "antiguedad": "Calculo: años_antiguedad = fecha_hoy - fecha_ingreso en años."
-        },
-      "registro_cols": "fecha_ingreso",
-      "nueva_columna": "antiguedad"
+  "criterios": {
+    "resultado_años": "Calculo: (fecha_hoy - fecha_ingreso) / 365.25",
+    "sin_datos": "Si fecha_ingreso es nula, retornar 0"
+  },
+  "registro_cols": "fecha_ingreso",
+  "nueva_columna": "antiguedad"
     },
     {"criterios": {
         "AUXILIAR": "Se usa si el cargo del trabajador es AUXILIAR o similares",
