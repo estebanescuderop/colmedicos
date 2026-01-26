@@ -52,10 +52,23 @@ def call_llm_safe(fn, *args, max_retries: int = 6, base: float = 0.6, **kwargs):
             time.sleep(wait)
 
 
-
 API_KEY = "API"
 API_KEY2 = "API"
 API_KEY3 = "API"
+
+# Al inicio de ia.py (después de los imports)
+# Crear clientes UNA vez, reutilizar siempre
+_CLIENT_POOL = {}
+
+def _get_client(api_key: str) -> openai.OpenAI:
+    """Obtiene cliente reutilizable del pool"""
+    if api_key not in _CLIENT_POOL:
+        _CLIENT_POOL[api_key] = openai.OpenAI(api_key=api_key)
+    return _CLIENT_POOL[api_key]
+
+
+
+
 instruccion = "Eres un médico especialista en Salud Ocupacional en Colombia. Especialista en hablar sobre datos estádisticos y relacionarlos con información de salud ocupacional. Tu trabajo es generar análisis cuantitativos basados en instrucciones médicas en español, interpretando las cifras y proporcionando recomendaciones claras y fundamentadas"
 rol = """Generas informes claros, técnicos y coherentes para empresas de todos los sectores económicos.
 Tu informe no se limita a describir datos: interpreta, contextualiza, correlaciona y recomienda, siempre con enfoque preventivo.
@@ -113,7 +126,7 @@ Con base a la siguiente INSTRUCCIÓN: {INSTRUCCION}
 def ask_gpt5(pregunta):
     """Envía un prompt y devuelve la respuesta de GPT-5."""
     instruc = json.dumps(pregunta, ensure_ascii=False)
-    client_ask = openai.OpenAI(api_key=API_KEY2)
+    client_ask = _get_client(api_key=API_KEY2)
     respuesta = call_llm_safe(client_ask.chat.completions.create,
         model="gpt-4.1",
         prompt_cache_retention="24h",
@@ -705,7 +718,7 @@ def graficos_gpt5(df, pregunta: Union[str, List[Dict[str, Any]]]) -> Union[Dict[
     instruccion_tipo = json.dumps(pregunta, ensure_ascii=False)
     rol1 = _MSJ_GRAFO_V2
     subprompt = _MSJ_GRAFO_V1.replace("{COLUMNAS_JSON}", payload_cols).replace("{INSTRUCCION}", str(instruccion_tipo))
-    client_grf = openai.OpenAI(api_key=API_KEY3)  
+    client_grf = _get_client(api_key=API_KEY3)  
     respuesta = call_llm_safe(client_grf.chat.completions.create,
     model="gpt-5",
     prompt_cache_retention="24h",
@@ -927,7 +940,7 @@ def operaciones_gpt5(df, pregunta):
     instruccion = json.dumps(pregunta, ensure_ascii=False)
     rol2 = MSJ_OPS
     subprompt = (_MSJ_OP_V2.replace("{COLUMNAS_JSON}", payload_cols).replace("{INSTRUCCION}", str(instruccion)))
-    client_op = openai.OpenAI(api_key=API_KEY2) 
+    client_op = _get_client(api_key=API_KEY2) 
     respuesta = call_llm_safe(client_op.chat.completions.create,
         model="gpt-5",
         prompt_cache_retention="24h",
@@ -974,7 +987,7 @@ Con base en {Criterios} y el siguiente registro {Registro}, devuelve la etiqueta
 def columns_gpt5(criterios, registro):
     """Envía un prompt y devuelve la respuesta de GPT-5."""
     # ✅ OPTIMIZADO: Eliminado time.sleep innecesario (el semáforo ya controla rate limiting)
-    client_col = openai.OpenAI(api_key=API_KEY)
+    client_col = _get_client(api_key=API_KEY)
     respuesta = call_llm_safe(client_col.chat.completions.create,
         model="gpt-4.1-mini",  # 👈 Aquí usas GPT-5 directamente
         messages=[
@@ -1109,6 +1122,7 @@ F) Salida de cálculos:
 
 FIN REGLAS FECHAS
 =========================
+
 CAPACIDAD ADICIONAL: SCORING POR FACTORES
 
 Si dentro de "criterios" existe una clave llamada "factores" y otra llamada "conteo", debes ejecutar un procedimiento adicional OBLIGATORIO:
@@ -1133,6 +1147,8 @@ Debes ejecutar el siguiente procedimiento OBLIGATORIO para cada registro:
    - TODAS las demás claves de "criterios" (excepto "factores")
    - Usa el valor de "conteo_factores".
    - Devuelve la etiqueta del PRIMER criterio que aplique.
+   - Si no hay factores evaluables (todos los datos son inválidos), conteo_factores = 0.
+   - conteo_factores SIEMPRE es un entero >= 0.
 
 4) Restricciones:
    - No infieras factores.
@@ -1153,6 +1169,13 @@ Debes ejecutar el siguiente procedimiento OBLIGATORIO para cada registro:
 7) Para la recolección de conteo criterios se puede utilizar operadores lógicos cómo: AND, OR, NOT, >=, <=, >, <, ==, !=, contains, startswith, endswith, in, not in.
 
 8) Si hay columnas con información compuesta (ejemplo: 130/85 en presión arterial), No intentes descomponerla, sólo usa operadores que puedan aplicarse directamente cómo 'startswith' (ejemplo: startswith "130").
+
+9) FALLBACK OBLIGATORIO para scoring:
+   - Si después de evaluar TODAS las reglas de clasificación usando
+     conteo_factores, NINGUNA aplica, devuelve la ÚLTIMA etiqueta de
+     clasificación definida (excluyendo "factores" y "conteo").
+   - NUNCA devuelvas vacío, null, o una clave técnica como "conteo".
+
  ================================================================
 
 FORMATO DE RESPUESTA ESPERADO (OBLIGATORIO):
@@ -1186,7 +1209,7 @@ No expliques nada. Devuelve únicamente el JSON.
 @register("columns_batch_gpt5")
 def columns_batch_gpt5(payload, fecha_hoy):
     """Envía un prompt y devuelve la respuesta de GPT-5."""
-    client_columns = openai.OpenAI(api_key=API_KEY3)
+    client_columns = _get_client(api_key=API_KEY3)
     rol3 = clasificador_batch
     # ✅ OPTIMIZADO: JSON compacto en lugar de str()
     payload_json = json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
@@ -1328,7 +1351,7 @@ def titulos_gpt5(texto):
     texto = json.dumps(texto, ensure_ascii=False)
     subprompt = titulos_instruccion.replace("{titulos}", texto)
     titulos_sistem = AG_TITULOS
-    client_titulos = openai.OpenAI(api_key=API_KEY)
+    client_titulos = _get_client(api_key=API_KEY)
     respuesta = call_llm_safe(client_titulos.chat.completions.create,
         model="gpt-4.1",
         prompt_cache_retention="24h",
@@ -1351,7 +1374,7 @@ Tu única misión es analizar un texto completo que contiene uno o varios bloque
 
 Cada bloque representa un APÉNDICE independiente.
 N es un número entero secuencial (1, 2, 3, ...).
-el id es el nombre único del apéndice (puede ser cualquier cadena).
+El id es el nombre único del apéndice (puede ser cualquier cadena).
 
 ================================================================
 1. OBJETIVO ÚNICO
@@ -1366,87 +1389,115 @@ Debes devolver exclusivamente un JSON con dos listas:
 No generes texto adicional, explicación ni comentarios.
 
 ================================================================
-2. DEFINICIÓN CRÍTICA
+2. DEFINICIÓN DE TIPOS DE APÉNDICE
 ================================================================
 
-TIPO A → Apéndices SIN bloques IA (+...+)  
+TIPO A → Apéndices SIN bloques IA (+...+)
 TIPO B → Apéndices CON bloques IA (+...+)
-
-Ambos deben tratarse de forma diferente.
 
 ================================================================
 3. REGLAS PARA APÉNDICES TIPO A (SIN +...+)
 ================================================================
 
-Un apéndice **SIN ningún bloque IA (+...+) SIEMPRE se debe CONSERVAR**.
+Un apéndice SIN ningún bloque IA (+...+) SIEMPRE se debe CONSERVAR.
 
-Se consideran válidos:
-- textos descriptivos,
-- explicaciones,
-- interpretaciones,
-- narrativa fija,
-- introducciones,
-- conclusiones,
-- texto técnico sin métricas,
-- cualquier contenido sin análisis IA.
+Incluye:
+- Textos descriptivos
+- Explicaciones e interpretaciones
+- Introducciones y conclusiones
+- Texto técnico sin métricas
+- Cualquier contenido sin análisis IA
 
-**Nunca** se deben borrar apéndices sin IA.
+REGLA: Sin bloques +...+ → CONSERVAR (sin excepciones)
 
 ================================================================
-4. REGLAS PARA APÉNDICES TIPO B (CON +...+)
+4. REGLAS PARA APÉNDICES TIPO B (CON +...+) - ETIQUETA DE METADATOS
 ================================================================
 
-Estos apéndices contienen análisis IA o tablas procesadas.  
-Deben conservarse SOLO si realmente incluyen datos válidos.
+Los apéndices con bloques IA (+...+) contienen una ETIQUETA de metadatos
+EN CUALQUIER PARTE del bloque (puede estar al inicio, en medio o cerca
+del final). Busca la etiqueta en TODO el contenido entre + y +.
+
+ETIQUETAS POSIBLES (buscar en cualquier posición):
+  [HAY_DATOS]   → Datos válidos con valores numéricos > 0
+  [SIN_DATOS]   → Sin datos o contenido vacío
+  [SOLO_CEROS]  → Todos los valores numéricos son 0
+  [ERROR]       → Error en procesamiento
 
 ================================================================
-4.1 UN APÉNDICE TIPO B SE CONSERVA SI:
+4.1 REGLA DE DECISIÓN (ÚNICA Y DETERMINISTA)
 ================================================================
 
-- Contiene al menos dentro de la información númerica descriptiva algun valor diferente de 0 dentro de +...+  
-    Ejemplo: 1, 2, 0.3, 15%, etc.
-- La información generalmente se presenta en formato tabular o de lista numerada. (ejemplo: Prueba   Resultado personas_unicas\n                                     Alcohol      Normal               0\n                                 Anfetaminas      Normal               0\n                             Benzodiacepinas      Normal               0\n                       Blastocistis Hoiminis      Normal               0\n                                     Cocaina      Normal               0\n                                     Cocaina   Realizado               0\n                            Colesterol Total    Alterado               0\n                            Colesterol Total No Aplicado               0\n                            Colesterol Total      Normal               0\n                                  Creatinina      Normal               1\n                                   Cristales )
-- Los datos numéricos no son todos 0.
-O si:
-- Contiene porcentajes, proporciones o métricas.
-- Contiene conteos o cálculos válidos.
-- Se presentan distribuciones que no son error.
-- Se muestra una tabla o resultado con valores diferentes a cero.
+Si encuentras alguna de estas etiquetas EN CUALQUIER PARTE del bloque:
 
-SI EXISTE AL MENOS UN VALOR VÁLIDO → **CONSERVAR**
-================================================================
-4.2 UN APÉNDICE TIPO B SE BORRA SOLO SI CUMPLE ALGUNA:
-================================================================
+  [HAY_DATOS]   → CONSERVAR
+  [SIN_DATOS]   → BORRAR
+  [SOLO_CEROS]  → BORRAR
+  [ERROR]       → BORRAR
 
-- El contenido entre +...+ está vacío.
-- No se encuentran números dentro de +...+.
-- TODOS los números dentro de +...+ son 0.
-    (Ejemplos claros de eliminación:)
-      - Todas las filas en 0
-      - Tablas tipo:
-        Resultado  |  conteo  
-        ------------|---------
-        Normal      |    0
-        Alterado    |    0
-
-- El contenido entre +...+ contiene errores:
-    “no se pudo traer data”
-    “error”
-    “fallo”
-    “no disponible”
-    “sin datos”
-
-- El contenido entre +...+ contiene avisos, placeholders o texto incoherente.
-- El contenido entre +...+ es puramente descriptivo sin datos numéricos.
-- No puede determinarse con certeza que existen datos válidos.
-- De manera explícita se informa que NO hay datos numéricos.
+IMPORTANTE: La etiqueta es la ÚNICA fuente de verdad.
+No interpretes los datos manualmente si existe la etiqueta.
 
 ================================================================
-5. REGLA MÁXIMA
+4.2 FALLBACK: SI NO HAY ETIQUETA EN UN BLOQUE +...+
 ================================================================
 
-SI UN APÉNDICE NO TIENE BLOQUES +...+ → **CONSERVAR**  
-SI TIENE +...+ PERO HAY DUDA SOBRE LOS DATOS → **BORRAR**
+Si un bloque +...+ NO contiene ninguna etiqueta ([HAY_DATOS], etc.):
+
+BORRAR si:
+- El contenido está vacío
+- Contiene mensajes de error: "error", "fallo", "no disponible"
+- TODOS los números visibles son 0
+
+CONSERVAR si:
+- Existe al menos UN valor numérico > 0 (ej: 1, 2, 0.3, 15%)
+- Hay porcentajes, proporciones o métricas válidas
+
+================================================================
+5. EJEMPLOS DE DECISIÓN
+================================================================
+
+EJEMPLO 1 - CONSERVAR (etiqueta al inicio):
++[HAY_DATOS]
+   actividad                    personas
+0  Transporte                   15
+1  Servicios                    7+
+→ Etiqueta [HAY_DATOS] encontrada → CONSERVAR
+
+EJEMPLO 2 - CONSERVAR (etiqueta en medio del bloque):
++Responde con la actividad económica con mayor conteo:
+
+[HAY_DATOS]
+   actividad                    personas
+0  Transporte                   15
+1  Servicios                    7
+sin mencionar nada mas+
+→ Etiqueta [HAY_DATOS] encontrada en medio → CONSERVAR
+
+EJEMPLO 3 - BORRAR (etiqueta SOLO_CEROS):
++[SOLO_CEROS]
+   resultado    conteo
+0  Normal       0
+1  Alterado     0+
+→ Etiqueta [SOLO_CEROS] → BORRAR
+
+EJEMPLO 4 - BORRAR (etiqueta SIN_DATOS en medio):
++Genera un resumen de:
+
+[SIN_DATOS]
+(vacío)+
+→ Etiqueta [SIN_DATOS] encontrada → BORRAR
+
+EJEMPLO 5 - BORRAR (etiqueta ERROR):
++[ERROR]
+no se pudo traer data+
+→ Etiqueta [ERROR] → BORRAR
+
+EJEMPLO 6 - SIN ETIQUETA (fallback manual):
++   prueba      valor
+0   Glucosa     95
+1   Creatinina  1.2+
+→ Sin etiqueta pero hay valores > 0 → CONSERVAR
 
 ================================================================
 6. SALIDA OBLIGATORIA
@@ -1459,13 +1510,14 @@ Devuelve exclusivamente este JSON:
   "borrar": [...]
 }
 
-- "conservar" → índices N de apéndices que deben conservarse.
-- "borrar" → índices N de apéndices que deben eliminarse.
+- "conservar" → índices N de apéndices que deben conservarse
+- "borrar" → índices N de apéndices que deben eliminarse
 
-No generes texto adicional ni comentarios.
-No reordenes los índices.
-No modifiques el texto.
-No inventes datos.
+PROHIBIDO:
+- Generar texto adicional o comentarios
+- Reordenar los índices
+- Modificar el texto original
+- Inventar datos
 
 FIN. SOLO JSON.
 """
@@ -1479,7 +1531,7 @@ Instrucción final: con base al {texto} devuelve solo JSON de salida válido.
 def apendices_gpt5(texto):
     """Envía un prompt y devuelve la respuesta de GPT-5."""
     subprompt = apendices_instruccion.replace("{texto}", texto)
-    client_apend = openai.OpenAI(api_key=API_KEY)
+    client_apend = _get_client(api_key=API_KEY)
     respuesta = call_llm_safe(client_apend.chat.completions.create,
         model="gpt-4.1",
         prompt_cache_retention="24h",

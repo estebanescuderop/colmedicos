@@ -1394,7 +1394,7 @@ def graficar_tabla(
             if numeric_col.notna().any():
                 if col == percentage_colname:
                     df_formatted[col] = numeric_col.apply(
-                        lambda x: f"{x:.0%}" if pd.notna(x) else ""
+                        lambda x: f"{x:.1%}" if pd.notna(x) else ""
                     )
                 else:
                     df_formatted[col] = numeric_col.apply(_format_number)
@@ -2583,7 +2583,7 @@ def _build_table_payload_exact(
             numeric_col = pd.to_numeric(df_display[col], errors="coerce")
             if numeric_col.notna().any():
                 if col == percentage_colname:
-                    df_formatted[col] = numeric_col.apply(lambda x: f"{x:.0%}" if pd.notna(x) else "")
+                    df_formatted[col] = numeric_col.apply(lambda x: f"{x:.1%}" if pd.notna(x) else "")
                 else:
                     df_formatted[col] = numeric_col.apply(_format_number)
         except Exception:

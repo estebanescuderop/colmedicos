@@ -196,7 +196,8 @@ def informe_final(
 
         # Detectar tokens de cada módulo antes de llamar nada costoso
         hay_data = bool(_re_data.search(text))
-        print(hay_data)
+        hay_ia = bool(_re_ia.search(text))  # Detectar ANTES de procesar_apendices
+        print(f"hay_data: {hay_data}, hay_ia: {hay_ia}")
 
         # 2) Data blocks (solo si hay ||...|| en el texto)
         if hay_data:
@@ -214,8 +215,7 @@ def informe_final(
             try:
                 contenido = procesar_apendices(text_for_next)
                 contenido, tabla = process_titulo_blocks(contenido)
-                text_filtrado = tabla + "\n\n" + contenido 
-                #+ "\n\n" + text_for_next
+                text_filtrado = tabla + "\n\n" + contenido
                 logs.append("Generación de portada y TOC: OK")
                 meta_detalle["t_apendices"] = round(time.perf_counter() - t35, 4)
                 text_for_next = text_filtrado
@@ -223,10 +223,7 @@ def informe_final(
                 logs.append(f"Generación de portada y TOC: ERROR → {e_port}")
                 meta_detalle["t_apendices"] = round(time.perf_counter() - t35, 4)
 
-        hay_ia   = bool(_re_ia.search(text_for_next))
-        print(hay_ia)
-
-        # 3) IA blocks (solo si hay +IA_)
+        # 3) IA blocks (solo si hay +...+)
         if hay_ia:
             t3 = time.perf_counter()
             out_ia = process_ia_blocks(text_for_next)
@@ -242,7 +239,7 @@ def informe_final(
         print("ANTES PLOT - tokens:", len(re.findall(r"#([^#]+)#", text_for_next)))
 
         hay_plot = bool(_re_plot.search(text_for_next))
-        print(hay_plot)       
+        print(f"hay_plot: {hay_plot}")
        
         # 4) Plot blocks (solo si hay #GRAFICA#)
         if hay_plot:

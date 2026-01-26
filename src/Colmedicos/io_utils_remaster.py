@@ -17,7 +17,7 @@ import numpy as np
 # --- Project-local ---
 from Colmedicos.registry import register
 from Colmedicos.ia import operaciones_gpt5, graficos_gpt5, ask_gpt5,columns_batch_gpt5, apendices_gpt5, titulos_gpt5
-from Colmedicos.math_ops import ejecutar_operaciones_condicionales
+from Colmedicos.math_ops import ejecutar_operaciones_condicionales, operaciones_con_metadatos, enriquecer_texto_con_metadatos
 from Colmedicos.charts import plot_from_params
 
 
@@ -550,7 +550,9 @@ def process_data_blocks(
         params = item.get("params")
 
         try:
-            resultado = ejecutar_operaciones_condicionales(df, params)
+            #resultado = ejecutar_operaciones_condicionales(df, params)
+            resultado, meta = operaciones_con_metadatos(df, params)
+            resultado = enriquecer_texto_con_metadatos(str(resultado), meta)
             resultado_fmt = _format_result_plain(resultado)
             resultados_ops.append((idx, params, span, resultado_fmt))
         except Exception as e:

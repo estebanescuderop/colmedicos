@@ -174,7 +174,6 @@ tareas = [
       "registro_cols": "audiometria",
       "nueva_columna": "audiometria"
     },
-
     {
       "criterios": {
         "NO REALIZADA.": "Se clasifica como NO REALIZADA si el texto indica ausencia de prueba, incluyendo variantes como 'no aplica', 'no realizada', con o sin puntos, mayúsculas o duplicaciones.",

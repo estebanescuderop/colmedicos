@@ -794,3 +794,132 @@ def ejecutar_operaciones_condicionales(
         filas.append(fila)
 
     return pd.DataFrame(filas)
+
+
+# ============================================================================
+# METADATOS DE PRESENCIA DE DATOS (No invasivo - funciones auxiliares)
+# ============================================================================
+
+def _evaluar_presencia_datos(resultado: Union[pd.DataFrame, Dict[str, Any]]) -> Tuple[bool, str]:
+    """
+    Determina si el resultado tiene datos significativos.
+
+    Criterios:
+    - 'Sin datos' = vacío O todos los valores numéricos son 0 o NaN
+    - 'Hay datos' = al menos 1 valor numérico > 0
+
+    Returns:
+        (hay_datos: bool, resumen: str)
+        resumen ∈ {"HAY_DATOS", "SIN_DATOS", "SOLO_CEROS", "ERROR"}
+    """
+    try:
+        if isinstance(resultado, pd.DataFrame):
+            if resultado.empty:
+                return False, "SIN_DATOS"
+
+            # Revisar columnas numéricas (excluyendo metadatos)
+            cols_num = resultado.select_dtypes(include=[np.number]).columns.tolist()
+            cols_num = [c for c in cols_num if not str(c).startswith("_")]
+
+            if not cols_num:
+                # No hay columnas numéricas - verificar si hay filas
+                return (True, "HAY_DATOS") if len(resultado) > 0 else (False, "SIN_DATOS")
+
+            valores = resultado[cols_num].values.flatten()
+            valores_validos = valores[~np.isnan(valores)]
+
+            if len(valores_validos) == 0:
+                return False, "SIN_DATOS"
+
+            if np.all(valores_validos == 0):
+                return False, "SOLO_CEROS"
+
+            return True, "HAY_DATOS"
+
+        elif isinstance(resultado, dict):
+            if not resultado:
+                return False, "SIN_DATOS"
+
+            # Revisar valores numéricos (excluyendo metadatos)
+            valores = []
+            for k, v in resultado.items():
+                if str(k).startswith("_"):
+                    continue
+                if isinstance(v, (int, float)):
+                    valores.append(v)
+
+            if not valores:
+                return False, "SIN_DATOS"
+
+            # Filtrar NaN
+            valores_validos = [v for v in valores if not (isinstance(v, float) and np.isnan(v))]
+
+            if not valores_validos:
+                return False, "SIN_DATOS"
+
+            if all(v == 0 for v in valores_validos):
+                return False, "SOLO_CEROS"
+
+            return True, "HAY_DATOS"
+
+        return False, "ERROR"
+
+    except Exception:
+        return False, "ERROR"
+
+
+def operaciones_con_metadatos(
+    df: pd.DataFrame,
+    spec: Union[Dict[str, Any], List[Dict[str, Any]]]
+) -> Tuple[Union[pd.DataFrame, Dict[str, Any]], Dict[str, Any]]:
+    """
+    Wrapper de ejecutar_operaciones_condicionales que agrega metadatos.
+
+    NO modifica la lógica original, solo añade información sobre presencia de datos.
+
+    Args:
+        df: DataFrame de entrada
+        spec: Especificación de operaciones (igual que ejecutar_operaciones_condicionales)
+
+    Returns:
+        (resultado_original, metadatos)
+        metadatos = {
+            "hay_datos": bool,
+            "resumen": str,  # "HAY_DATOS", "SIN_DATOS", "SOLO_CEROS", "ERROR"
+        }
+
+    Ejemplo:
+        resultado, meta = operaciones_con_metadatos(df, spec)
+        if not meta["hay_datos"]:
+            # Omitir apéndice sin consultar IA
+            pass
+    """
+    resultado = ejecutar_operaciones_condicionales(df, spec)
+    hay_datos, resumen = _evaluar_presencia_datos(resultado)
+
+    return resultado, {
+        "hay_datos": hay_datos,
+        "resumen": resumen
+    }
+
+
+def enriquecer_texto_con_metadatos(
+    texto: str,
+    resultado: Union[pd.DataFrame, Dict[str, Any]]
+) -> str:
+    """
+    Enriquece un texto con prefijo de metadatos para facilitar interpretación de IA.
+
+    Ejemplo:
+        texto_original = "actividad  personas\\n0 Transporte  15"
+        texto_enriquecido = "[HAY_DATOS]\\nactividad  personas\\n0 Transporte  15"
+
+    Args:
+        texto: Texto original (representación string del resultado)
+        resultado: DataFrame o Dict para evaluar presencia de datos
+
+    Returns:
+        Texto con prefijo [HAY_DATOS], [SIN_DATOS] o [SOLO_CEROS]
+    """
+    _, resumen = _evaluar_presencia_datos(resultado)
+    return f"[{resumen}]\n{texto}"
