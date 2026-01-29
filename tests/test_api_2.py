@@ -23,7 +23,7 @@ ctx = {
     "numero_personas": 51,
 }
 # Ruta del archivo Excel
-ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\prueba 4.xlsx"
+ruta_archivos = r"C:\Users\EstebanEscuderoPuert\Downloads\prueba_grande.xlsx"
 df_datos = pd.read_excel(ruta_archivos)
 maes_cie10 = r"C:\Users\EstebanEscuderoPuert\Downloads\cie10_maestro_limpio.xlsx"
 df_maestro = pd.read_excel(maes_cie10)

@@ -1475,8 +1475,8 @@ def aplicar_multiples_columnas_gpt5_ultra_v2(
     tareas: List[Dict[str, Any]],
     *,
     replace_existing: bool = True,
-    chunk_registros_unicos: int = 500,
-    max_workers: int = 10,
+    chunk_registros_unicos: int = 400,  # Reducido para evitar truncamiento por límite de tokens de salida (~16K)
+    max_workers: int = 18,
     batch_timeout: int = 180,
     max_retries: int = 2,
     float_precision: int = 6,
@@ -1499,8 +1499,11 @@ def aplicar_multiples_columnas_gpt5_ultra_v2(
         - "registro_cols": columnas necesarias para la tarea
     replace_existing : bool, default=True
         Si True, reemplaza valores existentes en las columnas.
-    chunk_registros_unicos : int, default=500
-        Registros únicos por llamada IA (no usado actualmente, reservado).
+    chunk_registros_unicos : int, default=300
+        Máximo de registros únicos por llamada a la API. Si hay más registros
+        únicos que este valor, se dividen en chunks y se procesan secuencialmente.
+        IMPORTANTE: No usar valores > 500, ya que GPT-4.1 tiene límite de ~16K
+        tokens de salida (~18 tokens por registro = ~900 registros máximo teórico).
     max_workers : int, default=10
         Workers paralelos para ejecutar tareas.
     batch_timeout : int, default=180
@@ -1578,11 +1581,12 @@ def aplicar_multiples_columnas_gpt5_ultra_v2(
             if key not in registros_unicos:
                 registros_unicos[key] = registro
 
-        # Preparar payload
+        # Preparar registros únicos con sus datos normalizados
         fecha_hoy = datetime.now().strftime("%Y-%m-%d")
-        registros_para_ia = []
         unique_keys = list(registros_unicos.keys())
 
+        # Preparar todos los registros únicos (clustering global ya aplicado)
+        registros_preparados = []
         for group_id, key in enumerate(unique_keys):
             registro = registros_unicos[key].copy()
             registro["fecha_hoy"] = fecha_hoy
@@ -1595,58 +1599,119 @@ def aplicar_multiples_columnas_gpt5_ultra_v2(
                 elif _safe_isna(v):
                     registro[k] = None
 
-            registros_para_ia.append({
+            registros_preparados.append({
+                "group_id": group_id,
+                "key": key,
                 "idx": f"G{group_id}",
                 "registro": registro
             })
 
-        payload = {
-            "Tareas": [{
-                "columna": col_out,
-                "criterios": criterios,
-                "registro_cols": reg_cols
-            }],
-            "Registros": registros_para_ia
-        }
+        # =====================================================================
+        # CHUNKING POST-CLUSTERING: Dividir registros únicos en chunks
+        # =====================================================================
+        def _chunk_list(lst, size):
+            for i in range(0, len(lst), size):
+                yield lst[i:i + size]
 
-        # Llamar IA con reintentos
-        respuesta = None
-        for _ in range(max_retries + 1):
-            try:
-                respuesta = fn_ia(payload, fecha_hoy=fecha_hoy)
-                if respuesta and isinstance(respuesta, dict) and "Resultados" in respuesta:
-                    break
-            except Exception:
-                pass
+        # Usar el parámetro chunk_registros_unicos (default 300)
+        chunks = list(_chunk_list(registros_preparados, chunk_registros_unicos))
+        total_chunks = len(chunks)
 
-        if respuesta is None or "Resultados" not in respuesta:
-            return []
+        # =====================================================================
+        # PROCESAR CHUNKS EN PARALELO (para mantener velocidad)
+        # =====================================================================
+        def _procesar_chunk(chunk_data):
+            """Procesa un chunk individual y retorna sus resultados."""
+            chunk_idx, chunk = chunk_data
+            registros_para_ia = [{"idx": r["idx"], "registro": r["registro"]} for r in chunk]
 
-        # Parsear respuesta y expandir a filas reales
-        resultados = respuesta.get("Resultados", {})
-        items = resultados.get(col_out, [])
+            payload = {
+                "Tareas": [{
+                    "columna": col_out,
+                    "criterios": criterios,
+                    "registro_cols": reg_cols
+                }],
+                "Registros": registros_para_ia
+            }
 
-        if not items:
-            return []
+            # Llamar IA con reintentos para este chunk
+            respuesta = None
+            for intento in range(max_retries + 1):
+                try:
+                    respuesta = fn_ia(payload, fecha_hoy=fecha_hoy)
+                    if respuesta and isinstance(respuesta, dict) and "Resultados" in respuesta:
+                        break
+                except Exception as e:
+                    if intento == max_retries:
+                        print(f"[WARN] {col_out}: Chunk {chunk_idx+1}/{total_chunks} falló: {e}")
 
-        mapa_respuestas = {}
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            id_ia = item.get("id", item.get("idx"))
-            val = item.get("resultado", item.get("etiqueta"))
-            if id_ia is not None:
-                mapa_respuestas[str(id_ia)] = val
+            # Parsear respuesta
+            chunk_results = {}
+            if respuesta and "Resultados" in respuesta:
+                resultados = respuesta.get("Resultados", {})
+                items = resultados.get(col_out, [])
 
+                # Verificar truncamiento
+                items_recibidos = len(items) if items else 0
+                items_enviados = len(chunk)
+                if items_recibidos < items_enviados:
+                    print(f"[WARN] {col_out}: Chunk {chunk_idx+1}/{total_chunks} - IA devolvió {items_recibidos}/{items_enviados} (truncado)")
+
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    id_ia = item.get("id", item.get("idx"))
+                    val = item.get("resultado", item.get("etiqueta"))
+                    if id_ia is not None:
+                        chunk_results[str(id_ia)] = val
+
+            return chunk_idx, chunk_results
+
+        # Ejecutar chunks en paralelo (usar menos workers que el semáforo de LLM)
+        mapa_respuestas_global = {}
+        max_chunk_workers = min(10, total_chunks)  # Máximo 10 chunks en paralelo
+
+        if total_chunks == 1:
+            # Solo un chunk, procesarlo directamente
+            _, chunk_results = _procesar_chunk((0, chunks[0]))
+            mapa_respuestas_global.update(chunk_results)
+        else:
+            # Múltiples chunks, procesarlos en paralelo
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_chunk_workers) as chunk_executor:
+                chunk_futures = [chunk_executor.submit(_procesar_chunk, (i, c)) for i, c in enumerate(chunks)]
+
+                completed = 0
+                for future in concurrent.futures.as_completed(chunk_futures):
+                    try:
+                        chunk_idx, chunk_results = future.result(timeout=batch_timeout)
+                        mapa_respuestas_global.update(chunk_results)
+                        completed += 1
+
+                        # Log de progreso cada 10 chunks o al final
+                        if completed % 10 == 0 or completed == total_chunks:
+                            procesados = len(mapa_respuestas_global)
+                            total = len(unique_keys)
+                            pct = procesados * 100 // total if total > 0 else 0
+                            print(f"[INFO] {col_out}: {completed}/{total_chunks} chunks completados - {procesados}/{total} únicos ({pct}%)")
+                    except Exception as e:
+                        print(f"[ERROR] {col_out}: Chunk falló con excepción: {e}")
+
+        # Expandir resultados a todas las filas originales usando clusters
         updates = []
         for group_id, key in enumerate(unique_keys):
-            etiqueta = mapa_respuestas.get(f"G{group_id}")
+            etiqueta = mapa_respuestas_global.get(f"G{group_id}")
             if etiqueta is None:
-                etiqueta = mapa_respuestas.get(str(group_id))
+                etiqueta = mapa_respuestas_global.get(str(group_id))
             if etiqueta is None:
                 continue
             for rid in clusters[key]:
                 updates.append((rid, col_out, etiqueta))
+
+        # Log final de cobertura
+        if len(unique_keys) > 0:
+            cobertura = len(mapa_respuestas_global) * 100 // len(unique_keys)
+            if cobertura < 100:
+                print(f"[WARN] {col_out}: Cobertura {cobertura}% ({len(mapa_respuestas_global)}/{len(unique_keys)} únicos)")
 
         return updates
 
